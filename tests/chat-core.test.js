@@ -148,3 +148,65 @@ test("hosted chatCore executes qwen through forwarded openrouter mode", async ()
   const payload = await result.response.json();
   assert.equal(payload.choices[0].message.content, "Hi from OpenRouter-forwarded Qwen");
 });
+
+test("hosted chatCore executes claude path and returns normalized response", async () => {
+  let capturedRequest = null;
+
+  const result = await handleHostedChatCore({
+    body: {
+      model: "claude-sonnet-4",
+      messages: [{ role: "user", content: "Hi from claude" }],
+    },
+    execution: {
+      provider: "claude",
+      baseUrl: "https://api.anthropic.com/v1/messages",
+    },
+    adapter: {
+      async getProviderCredentials() {
+        return {
+          apiKey: "claude-key-123",
+        };
+      },
+      async refreshProviderCredentials() {
+        return null;
+      },
+      async emitTrace() {},
+      async emitUsage() {},
+      onLifecycleEvent() {},
+    },
+    fetchFn: async (url, init) => {
+      capturedRequest = {
+        url,
+        headers: init.headers,
+        body: JSON.parse(init.body),
+      };
+
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        async json() {
+          return {
+            id: "msg_123",
+            model: "claude-sonnet-4",
+            content: [{ type: "text", text: "Hi from Claude" }],
+            stop_reason: "end_turn",
+            usage: {
+              input_tokens: 8,
+              output_tokens: 5,
+            },
+          };
+        },
+      };
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(capturedRequest.url, "https://api.anthropic.com/v1/messages?beta=true");
+  assert.equal(capturedRequest.headers["x-api-key"], "claude-key-123");
+  assert.equal(capturedRequest.body.messages[0].role, "user");
+
+  const payload = await result.response.json();
+  assert.equal(payload.choices[0].message.content, "Hi from Claude");
+  assert.equal(payload.usage.total_tokens, 13);
+});
