@@ -12,3 +12,5 @@ export * from "./providers/gemini/openaiToGeminiRequest.js";
 export * from "./server/config.js";
 export * from "./server/createServer.js";
 export * from "./traces/traceModel.js";
+export * from "./vendor/9router/open-sse/services/accountFallback.js";
+export * from "./vendor/9router/open-sse/executors/gemini-cli.js";

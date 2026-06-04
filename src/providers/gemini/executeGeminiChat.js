@@ -1,17 +1,14 @@
 import { createHostAdapter } from "../../adapters/createHostAdapter.js";
-import {
-  GEMINI_CLI_API_CLIENT,
-  geminiCLIUserAgent,
-} from "./constants.js";
 import { geminiToOpenAIResponse } from "./geminiToOpenAIResponse.js";
 import { openAIToGeminiCLIRequest } from "./openaiToGeminiRequest.js";
+import { GeminiCLIExecutor } from "../../vendor/9router/open-sse/executors/gemini-cli.js";
+import {
+  resetProxyAwareFetchImplementation,
+  setProxyAwareFetchImplementation,
+} from "../../vendor/9router/open-sse/utils/proxyFetch.js";
 
 const DEFAULT_GEMINI_BASE_URL = "https://cloudcode-pa.googleapis.com/v1internal";
-
-function buildGeminiUrl({ baseUrl = DEFAULT_GEMINI_BASE_URL, stream = false }) {
-  const action = stream ? "streamGenerateContent?alt=sse" : "generateContent";
-  return `${baseUrl}:${action}`;
-}
+const executor = new GeminiCLIExecutor();
 
 async function tryRefreshCredentials({ adapter, credentials, log }) {
   if (!credentials?.refreshToken) {
@@ -52,7 +49,12 @@ export async function executeGeminiChat({
     model,
     request: translatedBody,
   };
-  const url = buildGeminiUrl({ baseUrl, stream });
+  const url = executor.buildUrl(model, stream, 0, {
+    ...credentials,
+    providerSpecificData: {
+      baseUrl,
+    },
+  });
 
   await adapter.emitTrace({
     stage: "dispatch",
@@ -62,21 +64,29 @@ export async function executeGeminiChat({
     url,
   });
 
-  const executeRequest = async (activeCredentials) =>
-    fetchFn(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${activeCredentials.accessToken}`,
-        "User-Agent": geminiCLIUserAgent(model),
-        "X-Goog-Api-Client": GEMINI_CLI_API_CLIENT,
-        Accept: stream ? "text/event-stream" : "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
+  const executeRequest = async (activeCredentials) => {
+    setProxyAwareFetchImplementation(fetchFn);
+    try {
+      return executor.execute({
+        model,
+        body: requestBody,
+        stream,
+        credentials: {
+          ...activeCredentials,
+          providerSpecificData: {
+            baseUrl,
+          },
+        },
+        log,
+      });
+    } finally {
+      resetProxyAwareFetchImplementation();
+    }
+  };
 
   let activeCredentials = credentials;
-  let response = await executeRequest(activeCredentials);
+  let result = await executeRequest(activeCredentials);
+  let response = result.response;
 
   if ((response.status === 401 || response.status === 403) && activeCredentials.refreshToken) {
     const refreshed = await tryRefreshCredentials({
@@ -90,7 +100,8 @@ export async function executeGeminiChat({
         ...activeCredentials,
         ...refreshed,
       };
-      response = await executeRequest(activeCredentials);
+      result = await executeRequest(activeCredentials);
+      response = result.response;
     }
   }
 
@@ -124,7 +135,7 @@ export async function executeGeminiChat({
   return {
     upstream: {
       provider: "gemini-cli",
-      url,
+      url: result.url,
       status: response.status,
     },
     credentials: {

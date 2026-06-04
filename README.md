@@ -85,5 +85,6 @@ The repository now includes the first real implementation slice:
 - an HTTP server entrypoint with `/dashboard` and `/health`
 - config-driven plugin lifecycle and local-proxy status reporting
 - a first hosted Gemini execution seam behind RealtimeX-facing adapters
+- vendored `9router open-sse` chat/core layers beginning with executor, config, and fallback primitives
 
 Provider execution, proxy lifecycle ownership, and real trace ingestion are still follow-up work.
