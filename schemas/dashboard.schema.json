@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://realtimex.ai/schemas/terminal-governance-dashboard.schema.json",
+  "title": "Terminal Governance Dashboard Contract",
+  "type": "object",
+  "required": ["contract", "plugin", "catalog", "analytics", "localProxy"],
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "type": "object",
+      "required": ["id", "version", "stability", "route"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "stability": { "type": "string", "enum": ["production"] },
+        "route": { "type": "string", "const": "/dashboard" }
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "required": [
+        "manifestId",
+        "slug",
+        "displayName",
+        "enabled",
+        "loaded",
+        "runtimeStatus",
+        "installSource",
+        "lifecycle"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "manifestId": { "type": "string", "minLength": 1 },
+        "slug": { "type": "string", "minLength": 1 },
+        "displayName": { "type": "string", "minLength": 1 },
+        "enabled": { "type": "boolean" },
+        "loaded": { "type": "boolean" },
+        "runtimeStatus": { "type": "string", "minLength": 1 },
+        "installSource": { "type": "string", "minLength": 1 },
+        "lifecycle": {
+          "type": "object",
+          "required": [
+            "enableSupported",
+            "disableSupported",
+            "reloadRequired",
+            "healthSource"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "enableSupported": { "type": "boolean" },
+            "disableSupported": { "type": "boolean" },
+            "reloadRequired": { "type": "boolean" },
+            "healthSource": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "required": ["agents", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "agents": { "type": "array" },
+        "summary": {
+          "type": "object",
+          "required": [
+            "supported",
+            "installed",
+            "uninstalled",
+            "docsLinked",
+            "forwardable"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "supported": { "type": "integer", "minimum": 0 },
+            "installed": { "type": "integer", "minimum": 0 },
+            "uninstalled": { "type": "integer", "minimum": 0 },
+            "docsLinked": { "type": "integer", "minimum": 0 },
+            "forwardable": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "analytics": {
+      "type": "object",
+      "required": ["source", "ready", "summary", "recent", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string", "const": "plugin" },
+        "ready": { "type": "boolean" },
+        "summary": {
+          "type": "object",
+          "required": [
+            "trackedRequests",
+            "proxyIngressRequests",
+            "upstreamDispatches",
+            "totalCostUsd"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "trackedRequests": { "type": "integer", "minimum": 0 },
+            "proxyIngressRequests": { "type": "integer", "minimum": 0 },
+            "upstreamDispatches": { "type": "integer", "minimum": 0 },
+            "totalCostUsd": { "type": "number", "minimum": 0 }
+          }
+        },
+        "recent": { "type": "array" },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "localProxy": {
+      "type": "object",
+      "required": ["enabled", "status", "baseUrl", "port", "source", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "status": { "type": "string", "minLength": 1 },
+        "baseUrl": {
+          "anyOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }]
+        },
+        "port": { "type": "integer", "minimum": 1 },
+        "source": { "type": "string", "const": "plugin" },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
