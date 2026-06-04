@@ -1,7 +1,7 @@
 import { createHostAdapter } from "../../adapters/createHostAdapter.js";
-import { normalizeUsage, hasValidUsage } from "../../vendor/9router/open-sse/utils/usageTracking.js";
 import { PROVIDERS } from "../../vendor/9router/open-sse/config/providers.js";
 import { openaiToClaudeRequest } from "../../vendor/9router/open-sse/translator/request/openai-to-claude.js";
+import { executeHostedJsonProvider } from "../shared/executeHostedJsonProvider.js";
 
 function claudeToOpenAIResponse({ model, responseJson }) {
   let textContent = "";
@@ -95,73 +95,23 @@ export async function executeClaudeChat({
   translatedRequest = null,
   requestLogger = null,
 }) {
-  const credentials = await adapter.getProviderCredentials({
+  return executeHostedJsonProvider({
     provider: "claude",
     model,
     body,
+    adapter,
+    fetchFn,
+    log,
     connectionId,
-  });
-
-  if (!credentials?.apiKey && !credentials?.accessToken) {
-    throw new Error("Missing Claude credentials");
-  }
-
-  const translatedBody = translatedRequest ?? openaiToClaudeRequest(model, body, stream);
-  const url = baseUrl.includes("?beta=true") ? baseUrl : `${baseUrl}?beta=true`;
-  const headers = buildClaudeHeaders(credentials, stream);
-
-  await adapter.emitTrace({
-    stage: "dispatch",
-    provider: "claude",
-    model,
-    connectionId,
-    url,
-  });
-
-  requestLogger?.logTargetRequest?.(url, headers, translatedBody);
-  const response = await fetchFn(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(translatedBody),
-  });
-
-  const responseJson = await response.json();
-  requestLogger?.logProviderResponse?.(response.status, response.statusText ?? "", {}, responseJson);
-
-  await adapter.emitTrace({
-    stage: "provider-response",
-    provider: "claude",
-    model,
-    connectionId,
-    status: response.status,
-    url,
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      responseJson?.error?.message ??
-        responseJson?.message ??
-        `Claude upstream failed with status ${response.status}`,
-    );
-  }
-
-  const normalized = claudeToOpenAIResponse({ model, responseJson });
-  const normalizedUsage = normalizeUsage(normalized.usage);
-  if (hasValidUsage(normalizedUsage)) {
-    await adapter.emitUsage({
-      provider: "claude",
-      model,
-      connectionId,
-      usage: normalizedUsage,
-    });
-  }
-
-  return {
-    upstream: {
-      provider: "claude",
-      url,
-      status: response.status,
+    requestLogger,
+    isCredentialsValid: (credentials) => !!(credentials?.apiKey || credentials?.accessToken),
+    getRequestState: async ({ credentials }) => {
+      const requestBody = translatedRequest ?? openaiToClaudeRequest(model, body, stream);
+      const url = baseUrl.includes("?beta=true") ? baseUrl : `${baseUrl}?beta=true`;
+      const headers = buildClaudeHeaders(credentials, stream);
+      requestLogger?.logTargetRequest?.(url, headers, requestBody);
+      return { url, headers, requestBody };
     },
-    response: normalized,
-  };
+    normalizeResponse: async ({ responseJson }) => claudeToOpenAIResponse({ model, responseJson }),
+  });
 }

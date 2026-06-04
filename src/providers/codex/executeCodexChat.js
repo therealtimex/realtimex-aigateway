@@ -1,7 +1,7 @@
 import { createHostAdapter } from "../../adapters/createHostAdapter.js";
-import { normalizeUsage, hasValidUsage } from "../../vendor/9router/open-sse/utils/usageTracking.js";
 import { PROVIDERS } from "../../vendor/9router/open-sse/config/providers.js";
 import { openaiToCodexRequest } from "../../vendor/9router/open-sse/translator/request/openai-to-codex.js";
+import { executeHostedJsonProvider } from "../shared/executeHostedJsonProvider.js";
 
 function buildCodexHeaders(credentials, stream, connectionId) {
   const headers = {
@@ -116,72 +116,23 @@ export async function executeCodexChat({
   translatedRequest = null,
   requestLogger = null,
 }) {
-  const credentials = await adapter.getProviderCredentials({
+  return executeHostedJsonProvider({
     provider: "codex",
     model,
     body,
+    adapter,
+    fetchFn,
+    log,
     connectionId,
-  });
-
-  if (!credentials?.accessToken && !credentials?.apiKey) {
-    throw new Error("Missing Codex credentials");
-  }
-
-  const translatedBody = translatedRequest ?? openaiToCodexRequest(model, body, stream);
-  const headers = buildCodexHeaders(credentials, stream, connectionId);
-  const url = baseUrl;
-
-  await adapter.emitTrace({
-    stage: "dispatch",
-    provider: "codex",
-    model,
-    connectionId,
-    url,
-  });
-
-  requestLogger?.logTargetRequest?.(url, headers, translatedBody);
-  const response = await fetchFn(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(translatedBody),
-  });
-  const responseJson = await response.json();
-  requestLogger?.logProviderResponse?.(response.status, response.statusText ?? "", {}, responseJson);
-
-  await adapter.emitTrace({
-    stage: "provider-response",
-    provider: "codex",
-    model,
-    connectionId,
-    status: response.status,
-    url,
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      responseJson?.error?.message ??
-        responseJson?.message ??
-        `Codex upstream failed with status ${response.status}`,
-    );
-  }
-
-  const normalized = codexToOpenAIResponse({ model, responseJson });
-  const normalizedUsage = normalizeUsage(normalized.usage);
-  if (hasValidUsage(normalizedUsage)) {
-    await adapter.emitUsage({
-      provider: "codex",
-      model,
-      connectionId,
-      usage: normalizedUsage,
-    });
-  }
-
-  return {
-    upstream: {
-      provider: "codex",
-      url,
-      status: response.status,
+    requestLogger,
+    isCredentialsValid: (credentials) => !!(credentials?.accessToken || credentials?.apiKey),
+    getRequestState: async ({ credentials }) => {
+      const requestBody = translatedRequest ?? openaiToCodexRequest(model, body, stream);
+      const headers = buildCodexHeaders(credentials, stream, connectionId);
+      const url = baseUrl;
+      requestLogger?.logTargetRequest?.(url, headers, requestBody);
+      return { url, headers, requestBody };
     },
-    response: normalized,
-  };
+    normalizeResponse: async ({ responseJson }) => codexToOpenAIResponse({ model, responseJson }),
+  });
 }

@@ -1,6 +1,6 @@
 import { createHostAdapter } from "../../adapters/createHostAdapter.js";
-import { normalizeUsage, hasValidUsage } from "../../vendor/9router/open-sse/utils/usageTracking.js";
 import { PROVIDERS } from "../../vendor/9router/open-sse/config/providers.js";
+import { executeHostedJsonProvider } from "../shared/executeHostedJsonProvider.js";
 
 const QWEN_USER_AGENT = "QwenCode/0.12.3 (linux; x64)";
 const QWEN_STAINLESS = {
@@ -170,99 +170,48 @@ export async function executeQwenChat({
   translatedRequest = null,
   requestLogger = null,
 }) {
-  const credentials = await adapter.getProviderCredentials({
+  return executeHostedJsonProvider({
     provider: "qwen",
     model,
     body,
+    adapter,
+    fetchFn,
+    log,
     connectionId,
-  });
-
-  if (!credentials?.accessToken && !credentials?.apiKey) {
-    throw new Error("Missing Qwen credentials");
-  }
-
-  const translatedBody = transformQwenRequest(translatedRequest ?? body);
-  let activeCredentials = credentials;
-  let url = resolveQwenUrl(activeCredentials, baseUrl);
-  let headers = buildQwenHeaders(activeCredentials, stream, url);
-
-  const executeRequest = async (currentCredentials) => {
-    url = resolveQwenUrl(currentCredentials, baseUrl);
-    headers = buildQwenHeaders(currentCredentials, stream, url);
-    requestLogger?.logTargetRequest?.(url, headers, translatedBody);
-    return fetchFn(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        ...translatedBody,
+    requestLogger,
+    isCredentialsValid: (credentials) => !!(credentials?.accessToken || credentials?.apiKey),
+    getRequestState: async ({ credentials }) => {
+      const requestBody = {
+        ...transformQwenRequest(translatedRequest ?? body),
         model,
         stream,
-      }),
-    });
-  };
-
-  await adapter.emitTrace({
-    stage: "dispatch",
-    provider: "qwen",
-    model,
-    connectionId,
-    url,
-  });
-
-  let response = await executeRequest(activeCredentials);
-  if ((response.status === 401 || response.status === 403) && activeCredentials.refreshToken) {
-    const refreshed = await adapter.refreshProviderCredentials({
-      provider: "qwen",
-      credentials: activeCredentials,
-      log,
-    });
-
-    const fallbackRefresh = refreshed?.accessToken ? refreshed : await refreshQwenCredentials(activeCredentials, log);
-    if (fallbackRefresh?.accessToken || fallbackRefresh?.apiKey) {
-      activeCredentials = {
-        ...activeCredentials,
-        ...fallbackRefresh,
       };
-      response = await executeRequest(activeCredentials);
-    }
-  }
-
-  const responseJson = await response.json();
-  requestLogger?.logProviderResponse?.(response.status, response.statusText ?? "", {}, responseJson);
-
-  await adapter.emitTrace({
-    stage: "provider-response",
-    provider: "qwen",
-    model,
-    connectionId,
-    status: response.status,
-    url,
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      responseJson?.error?.message ??
-        responseJson?.message ??
-        `Qwen upstream failed with status ${response.status}`,
-    );
-  }
-
-  const normalizedUsage = normalizeUsage(responseJson?.usage);
-  if (hasValidUsage(normalizedUsage)) {
-    await adapter.emitUsage({
-      provider: url.includes("openrouter.ai") ? "openrouter" : "qwen",
-      model,
-      connectionId,
-      usage: normalizedUsage,
-    });
-  }
-
-  return {
-    upstream: {
-      provider: url.includes("openrouter.ai") ? "openrouter" : "qwen",
-      url,
-      status: response.status,
+      const url = resolveQwenUrl(credentials, baseUrl);
+      const headers = buildQwenHeaders(credentials, stream, url);
+      requestLogger?.logTargetRequest?.(url, headers, requestBody);
+      return {
+        url,
+        headers,
+        requestBody,
+        traceProvider: "qwen",
+      };
     },
-    response: responseJson,
-  };
+    shouldRefresh: ({ response, credentials }) =>
+      (response.status === 401 || response.status === 403) && !!credentials?.refreshToken,
+    refreshCredentials: async ({ adapter, credentials }) => {
+      const refreshed = await adapter.refreshProviderCredentials({
+        provider: "qwen",
+        credentials,
+        log,
+      });
+      if (refreshed?.accessToken || refreshed?.apiKey) {
+        return refreshed;
+      }
+      return refreshQwenCredentials(credentials, log);
+    },
+    normalizeResponse: async ({ responseJson }) => responseJson,
+    getUsage: ({ responseJson }) => responseJson?.usage,
+    getUsageProvider: ({ state }) => (state.url.includes("openrouter.ai") ? "openrouter" : "qwen"),
+    getUpstreamProvider: ({ state }) => (state.url.includes("openrouter.ai") ? "openrouter" : "qwen"),
+  });
 }
