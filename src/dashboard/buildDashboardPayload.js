@@ -33,27 +33,29 @@ function buildDefaultLocalProxy() {
 
 export function buildDashboardPayload(options = {}) {
   const agents = options.catalog?.agents ?? buildDefaultCatalog();
+  const pluginState = options.pluginState ?? {};
+  const pluginConfig = options.plugin ?? {};
 
   return {
     contract: buildDashboardContractDescriptor(),
     plugin: {
       manifestId:
-        options.plugin?.manifestId ?? "ai.realtimex.terminal-governance",
-      slug: options.plugin?.slug ?? "terminal-governance",
-      displayName: options.plugin?.displayName ?? "RealtimeX AI Gateway",
-      enabled: options.plugin?.enabled ?? true,
-      loaded: options.plugin?.loaded ?? true,
-      runtimeStatus: options.plugin?.runtimeStatus ?? "ready",
-      installSource: options.plugin?.installSource ?? "github",
+        pluginConfig.manifestId ?? "ai.realtimex.terminal-governance",
+      slug: pluginConfig.slug ?? "terminal-governance",
+      displayName: pluginConfig.displayName ?? "RealtimeX AI Gateway",
+      enabled: pluginConfig.enabled ?? true,
+      loaded: pluginConfig.loaded ?? true,
+      runtimeStatus: pluginState.runtimeStatus ?? pluginConfig.runtimeStatus ?? "ready",
+      installSource: pluginConfig.installSource ?? "github",
       lifecycle: {
         enableSupported:
-          options.plugin?.lifecycle?.enableSupported ?? true,
+          pluginConfig.lifecycle?.enableSupported ?? true,
         disableSupported:
-          options.plugin?.lifecycle?.disableSupported ?? true,
+          pluginConfig.lifecycle?.disableSupported ?? true,
         reloadRequired:
-          options.plugin?.lifecycle?.reloadRequired ?? false,
+          pluginConfig.lifecycle?.reloadRequired ?? false,
         healthSource:
-          options.plugin?.lifecycle?.healthSource ?? "plugin-self-report",
+          pluginConfig.lifecycle?.healthSource ?? "plugin-runtime-state",
       },
     },
     catalog: {

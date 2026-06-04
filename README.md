@@ -83,5 +83,6 @@ The repository now includes the first real implementation slice:
 - a default supported-agent catalog
 - a request handler for `GET /dashboard`
 - an HTTP server entrypoint with `/dashboard` and `/health`
+- config-driven plugin lifecycle and local-proxy status reporting
 
 Provider execution, proxy lifecycle ownership, and real trace ingestion are still follow-up work.

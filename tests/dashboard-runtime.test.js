@@ -5,7 +5,16 @@ import { DASHBOARD_ROUTE } from "../src/contracts/dashboardContract.js";
 import { createTerminalGovernancePluginRuntime } from "../src/plugin/runtime.js";
 
 test("dashboard runtime returns a contract-backed payload with supported agents", () => {
-  const runtime = createTerminalGovernancePluginRuntime();
+  const runtime = createTerminalGovernancePluginRuntime({
+    localProxy: {
+      enabled: true,
+      status: "configured",
+      baseUrl: "http://127.0.0.1:20128",
+      port: 20128,
+      source: "plugin",
+      notes: ["Configured in plugin state."],
+    },
+  });
   const payload = runtime.getDashboard();
 
   assert.equal(payload.contract.route, DASHBOARD_ROUTE);
@@ -17,6 +26,9 @@ test("dashboard runtime returns a contract-backed payload with supported agents"
   assert.equal(payload.catalog.summary.forwardable, 4);
   assert.equal(payload.analytics.source, "plugin");
   assert.equal(payload.localProxy.source, "plugin");
+  assert.equal(payload.localProxy.enabled, true);
+  assert.equal(payload.localProxy.status, "configured");
+  assert.equal(payload.localProxy.baseUrl, "http://127.0.0.1:20128");
 });
 
 test("dashboard runtime serves GET /dashboard and returns JSON", () => {

@@ -2,7 +2,7 @@ import { createGatewayServer } from "./createServer.js";
 import { resolveServerConfig } from "./config.js";
 
 const config = resolveServerConfig(process.env);
-const gateway = createGatewayServer();
+const gateway = createGatewayServer({ config });
 
 try {
   const address = await gateway.start(config);

@@ -1,6 +1,7 @@
 import http from "node:http";
 
 import { createTerminalGovernancePluginRuntime } from "../plugin/runtime.js";
+import { resolveServerConfig } from "./config.js";
 
 function jsonResponse(response, status, payload) {
   response.writeHead(status, {
@@ -14,10 +15,13 @@ export function createGatewayRequestListener(runtime = createTerminalGovernanceP
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
 
     if (request.method === "GET" && url.pathname === "/health") {
+      const dashboard = runtime.getDashboard();
+
       return jsonResponse(response, 200, {
         status: "ok",
         service: "realtimex-aigateway",
-        plugin: runtime.getDashboard().plugin,
+        plugin: dashboard.plugin,
+        localProxy: dashboard.localProxy,
       });
     }
 
@@ -32,14 +36,20 @@ export function createGatewayRequestListener(runtime = createTerminalGovernanceP
 }
 
 export function createGatewayServer(options = {}) {
-  const runtime = options.runtime ?? createTerminalGovernancePluginRuntime();
+  const config = options.config ?? resolveServerConfig(process.env);
+  const runtime =
+    options.runtime ??
+    createTerminalGovernancePluginRuntime({
+      localProxy: config.localProxy,
+    });
   const requestListener = createGatewayRequestListener(runtime);
   const server = http.createServer(requestListener);
 
   return {
+    config,
     runtime,
     server,
-    async start({ host = "127.0.0.1", port = 4010 } = {}) {
+    async start({ host = config.host, port = config.port } = {}) {
       await new Promise((resolve, reject) => {
         server.once("error", reject);
         server.listen(port, host, () => {
@@ -47,6 +57,8 @@ export function createGatewayServer(options = {}) {
           resolve();
         });
       });
+
+      runtime.setRuntimeStatus("listening");
 
       const address = server.address();
       return {
@@ -56,12 +68,15 @@ export function createGatewayServer(options = {}) {
     },
     async stop() {
       if (!server.listening) {
+        runtime.setRuntimeStatus("stopped");
         return;
       }
 
       await new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
+
+      runtime.setRuntimeStatus("stopped");
     },
   };
 }

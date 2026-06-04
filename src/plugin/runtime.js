@@ -12,14 +12,31 @@ function jsonResponse(status, payload) {
 }
 
 export function createTerminalGovernancePluginRuntime(options = {}) {
+  const state = {
+    runtimeStatus: options.pluginState?.runtimeStatus ?? "ready",
+  };
+
+  function buildPayload() {
+    return buildDashboardPayload({
+      ...options,
+      pluginState: state,
+    });
+  }
+
   return {
     kind: "terminal-governance-plugin",
+    getState() {
+      return { ...state };
+    },
+    setRuntimeStatus(runtimeStatus) {
+      state.runtimeStatus = runtimeStatus;
+    },
     getDashboard() {
-      return buildDashboardPayload(options);
+      return buildPayload();
     },
     handleRequest({ method = "GET", path = "/" } = {}) {
       if (method === "GET" && path === DASHBOARD_ROUTE) {
-        return jsonResponse(200, buildDashboardPayload(options));
+        return jsonResponse(200, buildPayload());
       }
 
       return jsonResponse(404, {
