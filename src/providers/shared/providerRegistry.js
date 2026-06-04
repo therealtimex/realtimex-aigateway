@@ -2,6 +2,7 @@ import { executeGeminiChat } from "../gemini/executeGeminiChat.js";
 import { executeQwenChat } from "../qwen/executeQwenChat.js";
 import { executeClaudeChat } from "../claude/executeClaudeChat.js";
 import { executeCodexChat } from "../codex/executeCodexChat.js";
+import { executeAntigravityChat } from "../antigravity/executeAntigravityChat.js";
 import { FORMATS } from "../../translator/index.js";
 
 const PROVIDER_REGISTRY = {
@@ -24,6 +25,10 @@ const PROVIDER_REGISTRY = {
   codex: {
     targetFormat: FORMATS.OPENAI_RESPONSES,
     runner: executeCodexChat,
+  },
+  antigravity: {
+    targetFormat: FORMATS.ANTIGRAVITY,
+    runner: executeAntigravityChat,
   },
 };
 

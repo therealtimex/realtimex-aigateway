@@ -55,6 +55,59 @@ test("translateRequest normalizes tool ids and delegates openai to gemini-cli", 
   assert.equal(translated.contents.length, 2);
 });
 
+test("translateRequest supports openai to antigravity envelope", () => {
+  const translated = translateRequest({
+    sourceFormat: FORMATS.OPENAI,
+    targetFormat: FORMATS.ANTIGRAVITY,
+    model: "gemini-2.5-pro",
+    body: {
+      messages: [{ role: "user", content: "List files" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "list_files",
+            parameters: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+              },
+              required: ["path"],
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  assert.equal(translated.userAgent, "antigravity");
+  assert.equal(translated.requestType, "agent");
+  assert.equal(translated.request.contents[0].role, "user");
+  assert.equal(translated.request.toolConfig.functionCallingConfig.mode, "VALIDATED");
+});
+
+test("translateRequest supports antigravity back to openai request shape", () => {
+  const translated = translateRequest({
+    sourceFormat: FORMATS.ANTIGRAVITY,
+    targetFormat: FORMATS.OPENAI,
+    model: "gemini-native",
+    body: {
+      userAgent: "antigravity",
+      request: {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: "Hi from AGY" }],
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(translated.messages[0].role, "user");
+  assert.equal(translated.messages[0].content, "Hi from AGY");
+});
+
 test("needsTranslation and initState expose chat-core seam basics", () => {
   assert.equal(needsTranslation(FORMATS.OPENAI, FORMATS.GEMINI_CLI), true);
   assert.equal(needsTranslation(FORMATS.OPENAI, FORMATS.OPENAI), false);

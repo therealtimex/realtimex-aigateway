@@ -281,3 +281,95 @@ test("hosted chatCore executes codex path and returns normalized response", asyn
   assert.equal(payload.choices[0].message.content, "Hi from Codex");
   assert.equal(payload.usage.total_tokens, 9);
 });
+
+test("hosted chatCore executes antigravity path and returns normalized response", async () => {
+  let capturedRequest = null;
+
+  const result = await handleHostedChatCore({
+    body: {
+      model: "gemini-native",
+      messages: [{ role: "user", content: "Hi from AGY" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "list_files",
+            parameters: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+              },
+              required: ["path"],
+            },
+          },
+        },
+      ],
+    },
+    execution: {
+      provider: "antigravity",
+    },
+    adapter: {
+      async getProviderCredentials() {
+        return {
+          accessToken: "agy-token-123",
+          projectId: "project-agy",
+        };
+      },
+      async refreshProviderCredentials() {
+        return null;
+      },
+      async emitTrace() {},
+      async emitUsage() {},
+      onLifecycleEvent() {},
+    },
+    fetchFn: async (url, init) => {
+      capturedRequest = {
+        url,
+        headers: init.headers,
+        body: JSON.parse(init.body),
+      };
+
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        async json() {
+          return {
+            response: {
+              candidates: [
+                {
+                  content: {
+                    role: "model",
+                    parts: [{ text: "Hi from Antigravity" }],
+                  },
+                  finishReason: "STOP",
+                },
+              ],
+              usageMetadata: {
+                promptTokenCount: 7,
+                candidatesTokenCount: 5,
+                totalTokenCount: 12,
+              },
+              modelVersion: "gemini-native",
+              responseId: "agy-response-1",
+            },
+          };
+        },
+      };
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(
+    capturedRequest.url,
+    "https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent",
+  );
+  assert.equal(capturedRequest.headers.Authorization, "Bearer agy-token-123");
+  assert.equal(capturedRequest.body.userAgent, "antigravity");
+  assert.equal(capturedRequest.body.requestType, "agent");
+  assert.equal(capturedRequest.body.request.toolConfig.functionCallingConfig.mode, "VALIDATED");
+
+  const payload = await result.response.json();
+  assert.equal(payload.choices[0].message.content, "Hi from Antigravity");
+  assert.equal(payload.usage.total_tokens, 12);
+});

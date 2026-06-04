@@ -10,6 +10,8 @@ import {
 } from "../vendor/9router/open-sse/translator/request/openai-to-gemini.js";
 import { openaiToClaudeRequest } from "../vendor/9router/open-sse/translator/request/openai-to-claude.js";
 import { openaiToCodexRequest } from "../vendor/9router/open-sse/translator/request/openai-to-codex.js";
+import { openaiToAntigravityRequest } from "../vendor/9router/open-sse/translator/request/openai-to-antigravity.js";
+import { antigravityToOpenAIRequest } from "../vendor/9router/open-sse/translator/request/antigravity-to-openai.js";
 
 const requestRegistry = new Map();
 
@@ -21,6 +23,8 @@ registerRequest(FORMATS.OPENAI, FORMATS.GEMINI, openaiToGeminiRequest);
 registerRequest(FORMATS.OPENAI, FORMATS.GEMINI_CLI, openaiToGeminiCLIRequest);
 registerRequest(FORMATS.OPENAI, FORMATS.CLAUDE, openaiToClaudeRequest);
 registerRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, openaiToCodexRequest);
+registerRequest(FORMATS.OPENAI, FORMATS.ANTIGRAVITY, openaiToAntigravityRequest);
+registerRequest(FORMATS.ANTIGRAVITY, FORMATS.OPENAI, antigravityToOpenAIRequest);
 
 function normalizeThinkingConfig(body) {
   if (!body?.thinking || !Array.isArray(body.messages) || body.messages.length === 0) {
@@ -72,11 +76,7 @@ export function translateRequest({
   let translated = result;
 
   if (sourceFormat !== targetFormat) {
-    if (sourceFormat !== FORMATS.OPENAI) {
-      throw new Error(`Unsupported source format: ${sourceFormat}`);
-    }
-
-    const translator = requestRegistry.get(`${FORMATS.OPENAI}:${targetFormat}`);
+    const translator = requestRegistry.get(`${sourceFormat}:${targetFormat}`);
     if (!translator) {
       throw new Error(`No request translator registered for ${sourceFormat} -> ${targetFormat}`);
     }

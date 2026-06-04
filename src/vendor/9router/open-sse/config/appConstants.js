@@ -22,6 +22,38 @@ export const GITHUB_COPILOT = {
   API_VERSION: "2025-04-01",
 };
 
+export const INTERNAL_REQUEST_HEADER = { name: "x-request-source", value: "local" };
+export const AG_TOOL_SUFFIX = "_ide";
+export const AG_DEFAULT_TOOLS = new Set([
+  "browser_subagent",
+  "command_status",
+  "find_by_name",
+  "generate_image",
+  "grep_search",
+  "list_dir",
+  "list_resources",
+  "multi_replace_file_content",
+  "notify_user",
+  "read_resource",
+  "read_terminal",
+  "read_url_content",
+  "replace_file_content",
+  "run_command",
+  "search_web",
+  "send_command_input",
+  "task_boundary",
+  "view_content_chunk",
+  "view_file",
+  "write_to_file",
+]);
+
+export const ANTIGRAVITY_HEADERS = {
+  "User-Agent": `antigravity/1.107.0 ${platform()}/${arch()}`,
+};
+
+export const ANTIGRAVITY_DEFAULT_SYSTEM =
+  "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.**Absolute paths only****Proactiveness**";
+
 export const REFRESH_LEAD_MS = {
   codex: 5 * 24 * 60 * 60 * 1000,
   claude: 4 * 60 * 60 * 1000,
