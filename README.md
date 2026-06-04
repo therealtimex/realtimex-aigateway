@@ -82,5 +82,6 @@ The repository now includes the first real implementation slice:
 - a contract-backed terminal governance dashboard runtime
 - a default supported-agent catalog
 - a request handler for `GET /dashboard`
+- an HTTP server entrypoint with `/dashboard` and `/health`
 
 Provider execution, proxy lifecycle ownership, and real trace ingestion are still follow-up work.
