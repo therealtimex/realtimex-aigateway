@@ -43,7 +43,7 @@ test("gateway server exposes /health and /dashboard", async (t) => {
 
   const dashboardBody = await dashboardResponse.json();
   assert.equal(dashboardBody.contract.route, "/dashboard");
-  assert.equal(dashboardBody.plugin.slug, "terminal-governance");
+  assert.equal(dashboardBody.plugin.slug, "realtimex-aigateway");
   assert.equal(dashboardBody.plugin.runtimeStatus, "listening");
   assert.equal(dashboardBody.localProxy.status, "configured");
 });

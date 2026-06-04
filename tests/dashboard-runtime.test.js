@@ -18,7 +18,7 @@ test("dashboard runtime returns a contract-backed payload with supported agents"
   const payload = runtime.getDashboard();
 
   assert.equal(payload.contract.route, DASHBOARD_ROUTE);
-  assert.equal(payload.plugin.slug, "terminal-governance");
+  assert.equal(payload.plugin.slug, "realtimex-aigateway");
   assert.equal(payload.catalog.summary.supported, 5);
   assert.equal(payload.catalog.summary.installed, 0);
   assert.equal(payload.catalog.summary.uninstalled, 5);

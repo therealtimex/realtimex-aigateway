@@ -48,6 +48,48 @@ Primary contract surface:
 - dashboard route: `GET /dashboard`
 - production schema: [`schemas/dashboard.schema.json`](./schemas/dashboard.schema.json)
 
+## Installation Artifact
+
+GitHub releases publish an installable RealTimeX plugin zip, not just source snapshots.
+
+Each release artifact contains:
+
+- `realtimex.plugin.json`
+- a CommonJS plugin entrypoint for the RealTimeX host loader
+- an embedded `gateway/` runtime that starts the ESM AI Gateway server inside the plugin directory
+
+Install flow inside RealTimeX:
+
+1. Download the release zip from GitHub Releases.
+2. In RealTimeX, install it through the plugin upload flow (`POST /plugins` or the equivalent UI).
+3. RealTimeX extracts the archive, reads `realtimex.plugin.json`, and loads `index.js` through the plugin manager.
+4. On activation, the plugin starts the embedded AI Gateway runtime and serves the terminal-governance dashboard contract through the host plugin route.
+
+Build the same artifact locally with:
+
+```bash
+npm run build:plugin
+```
+
+Artifacts are written to `dist/`:
+
+- `realtimex-aigateway-plugin-<version>.zip`
+- `realtimex-aigateway-plugin-<version>.sha256`
+
+## GitHub Release CI
+
+GitHub Actions builds release artifacts in `.github/workflows/release.yml`.
+
+- `workflow_dispatch`
+  - runs tests
+  - builds the plugin zip
+  - uploads the zip and checksum as workflow artifacts
+- `push` tag `v*`
+  - verifies the tag matches `package.json` version
+  - runs tests
+  - builds the plugin zip
+  - publishes a GitHub Release with the zip and checksum attached
+
 ## Planned Provider Families
 
 First-class target providers:

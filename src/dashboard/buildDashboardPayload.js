@@ -40,8 +40,8 @@ export function buildDashboardPayload(options = {}) {
     contract: buildDashboardContractDescriptor(),
     plugin: {
       manifestId:
-        pluginConfig.manifestId ?? "ai.realtimex.terminal-governance",
-      slug: pluginConfig.slug ?? "terminal-governance",
+        pluginConfig.manifestId ?? "com.realtimex.aigateway",
+      slug: pluginConfig.slug ?? "realtimex-aigateway",
       displayName: pluginConfig.displayName ?? "RealtimeX AI Gateway",
       enabled: pluginConfig.enabled ?? true,
       loaded: pluginConfig.loaded ?? true,
