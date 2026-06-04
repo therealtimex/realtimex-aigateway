@@ -4,6 +4,7 @@ import { createHostAdapter } from "../adapters/createHostAdapter.js";
 import { handleHostedChatCore } from "../vendor/9router/open-sse/handlers/chatCore.js";
 import { createTerminalGovernancePluginRuntime } from "../plugin/runtime.js";
 import { resolveServerConfig } from "./config.js";
+import { handleAntigravityIngress } from "../gateway/handleAntigravityIngress.js";
 
 function jsonResponse(response, status, payload) {
   response.writeHead(status, {
@@ -61,6 +62,38 @@ export function createGatewayRequestListener({
           path: url.pathname,
           headers: request.headers,
         },
+      });
+      return sendFetchResponse(response, result.response);
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1internal:generateContent") {
+      const body = await readJsonBody(request);
+      const result = await handleAntigravityIngress({
+        body,
+        adapter,
+        fetchFn,
+        execution: config.execution,
+        request: {
+          path: url.pathname,
+          headers: request.headers,
+        },
+        stream: false,
+      });
+      return sendFetchResponse(response, result.response);
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1internal:streamGenerateContent") {
+      const body = await readJsonBody(request);
+      const result = await handleAntigravityIngress({
+        body,
+        adapter,
+        fetchFn,
+        execution: config.execution,
+        request: {
+          path: url.pathname,
+          headers: request.headers,
+        },
+        stream: true,
       });
       return sendFetchResponse(response, result.response);
     }
