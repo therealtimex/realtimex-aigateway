@@ -39,9 +39,29 @@ async function readRequestBody(request) {
   };
 }
 
+function sanitizeFetchResponseHeaders(headers = new Headers()) {
+  const nextHeaders = {};
+
+  for (const [key, value] of headers.entries()) {
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    if (
+      !normalizedKey ||
+      normalizedKey === "content-length" ||
+      normalizedKey === "content-encoding" ||
+      normalizedKey === "transfer-encoding" ||
+      normalizedKey === "connection"
+    ) {
+      continue;
+    }
+    nextHeaders[key] = value;
+  }
+
+  return nextHeaders;
+}
+
 async function sendFetchResponse(response, webResponse) {
-  const headers = Object.fromEntries(webResponse.headers.entries());
-  const body = await webResponse.text();
+  const headers = sanitizeFetchResponseHeaders(webResponse.headers);
+  const body = Buffer.from(await webResponse.arrayBuffer());
   response.writeHead(webResponse.status, headers);
   response.end(body);
   return {

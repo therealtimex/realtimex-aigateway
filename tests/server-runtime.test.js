@@ -11,8 +11,8 @@ test("gateway server exposes /health and /dashboard", async (t) => {
       localProxy: {
         enabled: true,
         status: "configured",
-        baseUrl: "http://127.0.0.1:20128",
-        port: 20128,
+        baseUrl: "http://127.0.0.1:0",
+        port: 0,
         source: "plugin",
         notes: ["Configured in plugin state."],
       },
@@ -34,7 +34,11 @@ test("gateway server exposes /health and /dashboard", async (t) => {
   assert.equal(healthBody.service, "realtimex-aigateway");
   assert.equal(healthBody.plugin.runtimeStatus, "listening");
   assert.equal(healthBody.localProxy.enabled, true);
-  assert.equal(healthBody.localProxy.baseUrl, "http://127.0.0.1:20128");
+  const proxyAddress = gateway.proxyServer.address();
+  assert.equal(
+    healthBody.localProxy.baseUrl,
+    `http://${proxyAddress.address}:${proxyAddress.port}`,
+  );
 
   const dashboardResponse = await fetch(
     `http://${address.host}:${address.port}/dashboard`,
@@ -111,6 +115,10 @@ test("gateway server records ingress on proxy listener for unsupported native CL
 
 test("gateway server passes through native codex responses requests", async (t) => {
   let capturedRequest = null;
+  const upstreamBody = JSON.stringify({
+    id: "resp_123",
+    status: "completed",
+  });
   const gateway = createGatewayServer({
     config: {
       host: "127.0.0.1",
@@ -130,12 +138,10 @@ test("gateway server passes through native codex responses requests", async (t) 
         status: 200,
         headers: new Headers({
           "content-type": "application/json; charset=utf-8",
+          "content-length": String(Buffer.byteLength(upstreamBody)),
         }),
-        async text() {
-          return JSON.stringify({
-            id: "resp_123",
-            status: "completed",
-          });
+        async arrayBuffer() {
+          return Buffer.from(upstreamBody);
         },
       };
     },
@@ -172,6 +178,68 @@ test("gateway server passes through native codex responses requests", async (t) 
   const dashboardBody = await dashboardResponse.json();
   assert.equal(dashboardBody.analytics.summary.trackedRequests, 1);
   assert.equal(dashboardBody.analytics.summary.upstreamDispatches, 1);
+});
+
+test("gateway server strips upstream content-encoding when relaying native claude responses", async (t) => {
+  const upstreamBody = JSON.stringify({
+    id: "msg_123",
+    type: "message",
+    role: "assistant",
+    content: [{ type: "text", text: "hi from claude" }],
+  });
+  const gateway = createGatewayServer({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      localProxy: {
+        enabled: false,
+        status: "disabled",
+        baseUrl: null,
+        port: 20128,
+        source: "plugin",
+        notes: [],
+      },
+    },
+    fetchFn: async () => ({
+      status: 200,
+      headers: new Headers({
+        "content-type": "application/json; charset=utf-8",
+        "content-encoding": "gzip",
+        "content-length": String(Buffer.byteLength(upstreamBody)),
+      }),
+      async arrayBuffer() {
+        return Buffer.from(upstreamBody);
+      },
+    }),
+  });
+
+  const address = await gateway.start({ host: "127.0.0.1", port: 0 });
+
+  t.after(async () => {
+    await gateway.stop();
+  });
+
+  const response = await fetch(
+    `http://${address.host}:${address.port}/v1/messages`,
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer claude-token",
+        "content-type": "application/json",
+        "user-agent": "claude-cli/2.1.162",
+      },
+      body: JSON.stringify({
+        model: "claude-3-5-sonnet",
+        messages: [{ role: "user", content: "hi claude" }],
+      }),
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-encoding"), null);
+  assert.equal(response.headers.get("content-length"), null);
+  const body = await response.json();
+  assert.equal(body.content[0].text, "hi from claude");
 });
 
 test("gateway server executes hosted gemini chat via injected adapter and fetch", async (t) => {
