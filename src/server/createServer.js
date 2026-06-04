@@ -3,6 +3,7 @@ import http from "node:http";
 import { createHostAdapter } from "../adapters/createHostAdapter.js";
 import { executeHostedChat } from "../gateway/executeHostedChat.js";
 import { createTerminalGovernancePluginRuntime } from "../plugin/runtime.js";
+import { buildErrorBody } from "../vendor/9router/open-sse/utils/error.js";
 import { resolveServerConfig } from "./config.js";
 
 function jsonResponse(response, status, payload) {
@@ -51,13 +52,15 @@ export function createGatewayRequestListener({
           adapter,
           fetchFn,
           execution: config.execution,
+          request: {
+            path: url.pathname,
+            headers: request.headers,
+          },
         });
         return jsonResponse(response, 200, result.response);
       } catch (error) {
-        return jsonResponse(response, 502, {
-          error: "execution-failed",
-          message: error?.message ?? String(error),
-        });
+        const status = error?.payload?.error?.type === "invalid_request_error" ? 400 : 502;
+        return jsonResponse(response, status, error?.payload ?? buildErrorBody(status, error?.message ?? String(error)));
       }
     }
 

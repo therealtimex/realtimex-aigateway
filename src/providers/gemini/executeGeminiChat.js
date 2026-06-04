@@ -3,6 +3,10 @@ import { geminiToOpenAIResponse } from "./geminiToOpenAIResponse.js";
 import { openAIToGeminiCLIRequest } from "./openaiToGeminiRequest.js";
 import { GeminiCLIExecutor } from "../../vendor/9router/open-sse/executors/gemini-cli.js";
 import {
+  hasValidUsage,
+  normalizeUsage,
+} from "../../vendor/9router/open-sse/utils/usageTracking.js";
+import {
   resetProxyAwareFetchImplementation,
   setProxyAwareFetchImplementation,
 } from "../../vendor/9router/open-sse/utils/proxyFetch.js";
@@ -31,6 +35,8 @@ export async function executeGeminiChat({
   log,
   connectionId = null,
   baseUrl = DEFAULT_GEMINI_BASE_URL,
+  translatedRequest = null,
+  requestLogger = null,
 }) {
   const credentials = await adapter.getProviderCredentials({
     provider: "gemini-cli",
@@ -43,7 +49,7 @@ export async function executeGeminiChat({
     throw new Error("Missing Gemini credentials");
   }
 
-  const translatedBody = openAIToGeminiCLIRequest(model, body);
+  const translatedBody = translatedRequest ?? openAIToGeminiCLIRequest(model, body);
   const requestBody = {
     project: credentials.projectId ?? body.project ?? "default-project",
     model,
@@ -65,6 +71,13 @@ export async function executeGeminiChat({
   });
 
   const executeRequest = async (activeCredentials) => {
+    requestLogger?.logTargetRequest?.(
+      url,
+      {
+        Authorization: `Bearer ${activeCredentials.accessToken}`,
+      },
+      requestBody,
+    );
     setProxyAwareFetchImplementation(fetchFn);
     try {
       return executor.execute({
@@ -107,6 +120,8 @@ export async function executeGeminiChat({
 
   const responseJson = await response.json();
 
+  requestLogger?.logProviderResponse?.(response.status, response.statusText ?? "", {}, responseJson);
+
   await adapter.emitTrace({
     stage: "provider-response",
     provider: "gemini-cli",
@@ -124,13 +139,16 @@ export async function executeGeminiChat({
   }
 
   const normalized = geminiToOpenAIResponse({ model, responseJson });
+  const normalizedUsage = normalizeUsage(normalized.usage);
 
-  await adapter.emitUsage({
-    provider: "gemini-cli",
-    model,
-    connectionId,
-    usage: normalized.usage,
-  });
+  if (hasValidUsage(normalizedUsage)) {
+    await adapter.emitUsage({
+      provider: "gemini-cli",
+      model,
+      connectionId,
+      usage: normalizedUsage,
+    });
+  }
 
   return {
     upstream: {
