@@ -1,9 +1,8 @@
 import http from "node:http";
 
 import { createHostAdapter } from "../adapters/createHostAdapter.js";
-import { executeHostedChat } from "../gateway/executeHostedChat.js";
+import { handleHostedChatCore } from "../vendor/9router/open-sse/handlers/chatCore.js";
 import { createTerminalGovernancePluginRuntime } from "../plugin/runtime.js";
-import { buildErrorBody } from "../vendor/9router/open-sse/utils/error.js";
 import { resolveServerConfig } from "./config.js";
 
 function jsonResponse(response, status, payload) {
@@ -22,6 +21,13 @@ async function readJsonBody(request) {
 
   const rawBody = Buffer.concat(chunks).toString("utf8");
   return rawBody ? JSON.parse(rawBody) : {};
+}
+
+async function sendFetchResponse(response, webResponse) {
+  const headers = Object.fromEntries(webResponse.headers.entries());
+  const body = await webResponse.text();
+  response.writeHead(webResponse.status, headers);
+  response.end(body);
 }
 
 export function createGatewayRequestListener({
@@ -45,23 +51,18 @@ export function createGatewayRequestListener({
     }
 
     if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
-      try {
-        const body = await readJsonBody(request);
-        const result = await executeHostedChat({
-          body,
-          adapter,
-          fetchFn,
-          execution: config.execution,
-          request: {
-            path: url.pathname,
-            headers: request.headers,
-          },
-        });
-        return jsonResponse(response, 200, result.response);
-      } catch (error) {
-        const status = error?.payload?.error?.type === "invalid_request_error" ? 400 : 502;
-        return jsonResponse(response, status, error?.payload ?? buildErrorBody(status, error?.message ?? String(error)));
-      }
+      const body = await readJsonBody(request);
+      const result = await handleHostedChatCore({
+        body,
+        adapter,
+        fetchFn,
+        execution: config.execution,
+        request: {
+          path: url.pathname,
+          headers: request.headers,
+        },
+      });
+      return sendFetchResponse(response, result.response);
     }
 
     const pluginResponse = runtime.handleRequest({

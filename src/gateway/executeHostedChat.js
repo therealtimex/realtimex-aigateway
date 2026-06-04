@@ -1,21 +1,5 @@
 import { createHostAdapter } from "../adapters/createHostAdapter.js";
-import { executeGeminiChat } from "../providers/gemini/executeGeminiChat.js";
-import {
-  createRequestLogger,
-} from "../vendor/9router/open-sse/utils/requestLogger.js";
-import { buildErrorBody } from "../vendor/9router/open-sse/utils/error.js";
-import { detectRequestFormat, FORMATS, translateRequest } from "../translator/index.js";
-
-function resolveTargetFormat(provider) {
-  switch (provider) {
-    case "gemini-cli":
-      return FORMATS.GEMINI_CLI;
-    case "gemini":
-      return FORMATS.GEMINI;
-    default:
-      throw new Error(`Unsupported execution provider: ${provider}`);
-  }
-}
+import { handleHostedChatCore } from "../vendor/9router/open-sse/handlers/chatCore.js";
 
 export async function executeHostedChat({
   body,
@@ -26,43 +10,26 @@ export async function executeHostedChat({
   connectionId = null,
   request = {},
 }) {
-  const model = body?.model;
-  if (!model) {
-    throw new Error("Chat request is missing model");
-  }
-
-  const provider = execution.provider ?? "gemini-cli";
-  const targetFormat = resolveTargetFormat(provider);
-  const sourceFormat = detectRequestFormat(request.path ?? "/v1/chat/completions", body);
-  const requestLogger = await createRequestLogger(sourceFormat, targetFormat, model, adapter);
-
-  requestLogger.logClientRawRequest(request.path ?? "/v1/chat/completions", body, request.headers ?? {});
-  requestLogger.logRawRequest(body, request.headers ?? {});
-  const translatedRequest = translateRequest({
-    sourceFormat,
-    targetFormat,
-    model,
-    body,
-    stream: body.stream === true,
-    requestLogger,
-  });
-
-  if (provider !== "gemini-cli") {
-    const error = new Error(`Unsupported execution provider: ${provider}`);
-    error.payload = buildErrorBody(400, error.message);
-    throw error;
-  }
-
-  return executeGeminiChat({
-    model,
+  const result = await handleHostedChatCore({
     body,
     adapter,
     fetchFn,
-    stream: body.stream === true,
+    execution,
     log,
     connectionId,
-    baseUrl: execution.baseUrl,
-    translatedRequest,
-    requestLogger,
+    request,
   });
+
+  if (!result.success) {
+    const payload = await result.response.json();
+    const error = new Error(result.error || payload?.error?.message || "Hosted chat failed");
+    error.payload = payload;
+    error.statusCode = result.status;
+    throw error;
+  }
+
+  const payload = await result.response.json();
+  return {
+    response: payload,
+  };
 }
