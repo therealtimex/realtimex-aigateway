@@ -21,6 +21,75 @@ test("openai request is translated to gemini-cli request shape", () => {
   assert.equal(request.contents[0].parts[0].text, "Hello");
   assert.equal(request.generationConfig.temperature, 0.2);
   assert.equal(request.generationConfig.maxOutputTokens, 128);
+  assert.equal(request.safetySettings[0].category, "HARM_CATEGORY_HATE_SPEECH");
+});
+
+test("openai request translation preserves tools, tool results, and multimodal parts", () => {
+  const request = openAIToGeminiCLIRequest("gemini-2.5-pro", {
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Inspect this screenshot" },
+          { type: "image_url", image_url: { url: "https://example.com/screenshot.png" } },
+        ],
+      },
+      {
+        role: "assistant",
+        content: "Calling tool",
+        tool_calls: [
+          {
+            id: "tool-call-1",
+            type: "function",
+            function: {
+              name: "list_files",
+              arguments: "{\"path\":\"/tmp\"}",
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "tool-call-1",
+        content: "{\"entries\":[\"a.txt\"]}",
+      },
+    ],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "list_files",
+          description: "List files in a directory",
+          parameters: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                minLength: 1,
+              },
+            },
+            required: ["path"],
+          },
+        },
+      },
+    ],
+    reasoning_effort: "medium",
+  });
+
+  assert.equal(request.contents[0].parts[1].fileData.fileUri, "https://example.com/screenshot.png");
+  assert.equal(request.contents[1].parts[1].functionCall.name, "list_files");
+  assert.deepEqual(request.contents[2].parts[0].functionResponse.response.result, {
+    entries: ["a.txt"],
+  });
+  assert.equal(request.tools[0].functionDeclarations[0].parameters.properties.path.type, "string");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      request.tools[0].functionDeclarations[0].parameters.properties.path,
+      "minLength",
+    ),
+    false,
+  );
+  assert.equal(request.generationConfig.thinkingConfig.thinkingBudget, 8192);
 });
 
 test("gemini executor uses adapter credentials, emits traces, and returns openai response shape", async () => {
