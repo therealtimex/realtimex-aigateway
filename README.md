@@ -77,6 +77,10 @@ First-class target providers:
 
 ## Status
 
-This scaffold is production-oriented, but still pre-implementation.
+The repository now includes the first real implementation slice:
 
-The host contract is frozen first in RealtimeX issue `#790`, and this repo starts from that contract rather than from ad hoc router code.
+- a contract-backed terminal governance dashboard runtime
+- a default supported-agent catalog
+- a request handler for `GET /dashboard`
+
+Provider execution, proxy lifecycle ownership, and real trace ingestion are still follow-up work.
