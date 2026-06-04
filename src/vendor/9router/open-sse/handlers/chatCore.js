@@ -1,4 +1,5 @@
 import { executeGeminiChat } from "../../../../providers/gemini/executeGeminiChat.js";
+import { executeQwenChat } from "../../../../providers/qwen/executeQwenChat.js";
 import { FORMATS, detectRequestFormat, translateRequest } from "../../../../translator/index.js";
 import { createErrorResult, buildErrorBody } from "../utils/error.js";
 import { createRequestLogger } from "../utils/requestLogger.js";
@@ -10,6 +11,8 @@ function resolveTargetFormat(provider) {
       return FORMATS.GEMINI_CLI;
     case "gemini":
       return FORMATS.GEMINI;
+    case "qwen":
+      return FORMATS.OPENAI;
     default:
       throw new Error(`Unsupported execution provider: ${provider}`);
   }
@@ -19,6 +22,8 @@ function resolveProviderRunner(provider) {
   switch (provider) {
     case "gemini-cli":
       return executeGeminiChat;
+    case "qwen":
+      return executeQwenChat;
     default:
       throw new Error(`Unsupported execution provider: ${provider}`);
   }

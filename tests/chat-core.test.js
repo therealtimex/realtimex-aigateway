@@ -73,3 +73,78 @@ test("hosted chatCore executes gemini path and returns response object", async (
   assert.equal(payload.object, "chat.completion");
   assert.equal(payload.choices[0].message.content, "Hi from hosted chatCore");
 });
+
+test("hosted chatCore executes qwen through forwarded openrouter mode", async () => {
+  let capturedRequest = null;
+
+  const result = await handleHostedChatCore({
+    body: {
+      model: "qwen3-coder-plus",
+      messages: [{ role: "user", content: "Hi from qwen" }],
+    },
+    execution: {
+      provider: "qwen",
+      baseUrl: "https://openrouter.ai/api/v1",
+    },
+    adapter: {
+      async getProviderCredentials() {
+        return {
+          accessToken: "token-openrouter",
+          providerSpecificData: {
+            baseUrl: "https://openrouter.ai/api/v1",
+          },
+        };
+      },
+      async refreshProviderCredentials() {
+        return null;
+      },
+      async emitTrace() {},
+      async emitUsage() {},
+      onLifecycleEvent() {},
+    },
+    fetchFn: async (url, init) => {
+      capturedRequest = {
+        url,
+        headers: init.headers,
+        body: JSON.parse(init.body),
+      };
+
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        async json() {
+          return {
+            id: "chatcmpl-qwen",
+            object: "chat.completion",
+            created: 1,
+            model: "qwen3-coder-plus",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Hi from OpenRouter-forwarded Qwen",
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 6,
+              completion_tokens: 4,
+              total_tokens: 10,
+            },
+          };
+        },
+      };
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(capturedRequest.url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(capturedRequest.headers["X-Title"], "Endpoint Proxy");
+  assert.equal(capturedRequest.body.messages[0].role, "system");
+
+  const payload = await result.response.json();
+  assert.equal(payload.choices[0].message.content, "Hi from OpenRouter-forwarded Qwen");
+});
