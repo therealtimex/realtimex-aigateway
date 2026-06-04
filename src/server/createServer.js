@@ -1,4 +1,5 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 
 import { createHostAdapter } from "../adapters/createHostAdapter.js";
 import { handleHostedChatCore } from "../vendor/9router/open-sse/handlers/chatCore.js";
@@ -29,6 +30,36 @@ async function sendFetchResponse(response, webResponse) {
   const body = await webResponse.text();
   response.writeHead(webResponse.status, headers);
   response.end(body);
+  return {
+    status: webResponse.status,
+    headers,
+    body,
+  };
+}
+
+function createInstrumentedAdapter(baseAdapter, runtime) {
+  const adapter = baseAdapter ?? createHostAdapter();
+
+  return createHostAdapter({
+    async getProviderCredentials(...args) {
+      return adapter.getProviderCredentials?.(...args) ?? null;
+    },
+    async refreshProviderCredentials(...args) {
+      return adapter.refreshProviderCredentials?.(...args) ?? null;
+    },
+    async emitTrace(event) {
+      await adapter.emitTrace?.(event);
+      runtime.recordTrace(event);
+    },
+    async emitUsage(event) {
+      await adapter.emitUsage?.(event);
+      runtime.recordUsage(event);
+    },
+    onLifecycleEvent(event) {
+      adapter.onLifecycleEvent?.(event);
+      runtime.recordLifecycle(event);
+    },
+  });
 }
 
 export function createGatewayRequestListener({
@@ -52,50 +83,92 @@ export function createGatewayRequestListener({
     }
 
     if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
+      const requestId = randomUUID();
+      runtime.recordIngress({
+        requestId,
+        method: request.method,
+        path: url.pathname,
+      });
       const body = await readJsonBody(request);
       const result = await handleHostedChatCore({
         body,
         adapter,
         fetchFn,
         execution: config.execution,
+        connectionId: requestId,
         request: {
           path: url.pathname,
           headers: request.headers,
         },
       });
-      return sendFetchResponse(response, result.response);
+      const delivered = await sendFetchResponse(response, result.response);
+      runtime.recordDelivery({
+        requestId,
+        method: request.method,
+        path: url.pathname,
+        status: delivered.status,
+      });
+      return;
     }
 
     if (request.method === "POST" && url.pathname === "/v1internal:generateContent") {
+      const requestId = randomUUID();
+      runtime.recordIngress({
+        requestId,
+        method: request.method,
+        path: url.pathname,
+      });
       const body = await readJsonBody(request);
       const result = await handleAntigravityIngress({
         body,
         adapter,
         fetchFn,
         execution: config.execution,
+        connectionId: requestId,
         request: {
           path: url.pathname,
           headers: request.headers,
         },
         stream: false,
       });
-      return sendFetchResponse(response, result.response);
+      const delivered = await sendFetchResponse(response, result.response);
+      runtime.recordDelivery({
+        requestId,
+        method: request.method,
+        path: url.pathname,
+        status: delivered.status,
+      });
+      return;
     }
 
     if (request.method === "POST" && url.pathname === "/v1internal:streamGenerateContent") {
+      const requestId = randomUUID();
+      runtime.recordIngress({
+        requestId,
+        method: request.method,
+        path: url.pathname,
+      });
       const body = await readJsonBody(request);
       const result = await handleAntigravityIngress({
         body,
         adapter,
         fetchFn,
         execution: config.execution,
+        connectionId: requestId,
         request: {
           path: url.pathname,
           headers: request.headers,
         },
         stream: true,
       });
-      return sendFetchResponse(response, result.response);
+      const delivered = await sendFetchResponse(response, result.response);
+      runtime.recordDelivery({
+        requestId,
+        method: request.method,
+        path: url.pathname,
+        status: delivered.status,
+      });
+      return;
     }
 
     const pluginResponse = runtime.handleRequest({
@@ -115,9 +188,10 @@ export function createGatewayServer(options = {}) {
     createTerminalGovernancePluginRuntime({
       localProxy: config.localProxy,
     });
+  const adapter = createInstrumentedAdapter(options.adapter, runtime);
   const requestListener = createGatewayRequestListener({
     runtime,
-    adapter: options.adapter,
+    adapter,
     fetchFn: options.fetchFn,
     config,
   });

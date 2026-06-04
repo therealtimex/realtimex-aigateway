@@ -22,6 +22,7 @@ export async function handleAntigravityIngress({
   fetchFn,
   execution = {},
   request = {},
+  connectionId = null,
   stream = false,
 }) {
   const model = body?.model;
@@ -47,6 +48,7 @@ export async function handleAntigravityIngress({
     adapter,
     fetchFn,
     execution,
+    connectionId,
     request: {
       path: "/v1/chat/completions",
       headers: request.headers ?? {},

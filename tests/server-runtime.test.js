@@ -147,6 +147,17 @@ test("gateway server executes hosted gemini chat via injected adapter and fetch"
   assert.equal(body.object, "chat.completion");
   assert.equal(body.choices[0].message.content, "Gateway Gemini reply");
   assert.equal(traces.length, 2);
+
+  const dashboardResponse = await fetch(
+    `http://${address.host}:${address.port}/dashboard`,
+  );
+  assert.equal(dashboardResponse.status, 200);
+  const dashboardBody = await dashboardResponse.json();
+  assert.equal(dashboardBody.analytics.ready, true);
+  assert.equal(dashboardBody.analytics.summary.trackedRequests, 1);
+  assert.equal(dashboardBody.analytics.summary.proxyIngressRequests, 1);
+  assert.equal(dashboardBody.analytics.summary.upstreamDispatches, 1);
+  assert.match(dashboardBody.analytics.notes[0], /Observed 1 request/);
 });
 
 test("gateway server accepts antigravity generateContent ingress and returns antigravity JSON", async (t) => {
