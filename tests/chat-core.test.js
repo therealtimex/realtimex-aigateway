@@ -210,3 +210,74 @@ test("hosted chatCore executes claude path and returns normalized response", asy
   assert.equal(payload.choices[0].message.content, "Hi from Claude");
   assert.equal(payload.usage.total_tokens, 13);
 });
+
+test("hosted chatCore executes codex path and returns normalized response", async () => {
+  let capturedRequest = null;
+
+  const result = await handleHostedChatCore({
+    body: {
+      model: "gpt-5-codex",
+      messages: [{ role: "user", content: "Hi from codex" }],
+    },
+    execution: {
+      provider: "codex",
+      baseUrl: "https://chatgpt.com/backend-api/codex/responses",
+    },
+    adapter: {
+      async getProviderCredentials() {
+        return {
+          accessToken: "codex-token-123",
+          providerSpecificData: {
+            workspaceId: "workspace-9",
+          },
+        };
+      },
+      async refreshProviderCredentials() {
+        return null;
+      },
+      async emitTrace() {},
+      async emitUsage() {},
+      onLifecycleEvent() {},
+    },
+    fetchFn: async (url, init) => {
+      capturedRequest = {
+        url,
+        headers: init.headers,
+        body: JSON.parse(init.body),
+      };
+
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        async json() {
+          return {
+            id: "resp_codex_2",
+            model: "gpt-5-codex",
+            output: [
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Hi from Codex" }],
+              },
+            ],
+            usage: {
+              input_tokens: 4,
+              output_tokens: 5,
+              total_tokens: 9,
+            },
+          };
+        },
+      };
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(capturedRequest.url, "https://chatgpt.com/backend-api/codex/responses");
+  assert.equal(capturedRequest.headers.session_id, "workspace-9");
+  assert.equal(capturedRequest.body.input[0].role, "user");
+
+  const payload = await result.response.json();
+  assert.equal(payload.choices[0].message.content, "Hi from Codex");
+  assert.equal(payload.usage.total_tokens, 9);
+});

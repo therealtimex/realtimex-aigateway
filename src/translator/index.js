@@ -9,6 +9,7 @@ import {
   openaiToGeminiRequest,
 } from "../vendor/9router/open-sse/translator/request/openai-to-gemini.js";
 import { openaiToClaudeRequest } from "../vendor/9router/open-sse/translator/request/openai-to-claude.js";
+import { openaiToCodexRequest } from "../vendor/9router/open-sse/translator/request/openai-to-codex.js";
 
 const requestRegistry = new Map();
 
@@ -19,6 +20,7 @@ function registerRequest(from, to, translator) {
 registerRequest(FORMATS.OPENAI, FORMATS.GEMINI, openaiToGeminiRequest);
 registerRequest(FORMATS.OPENAI, FORMATS.GEMINI_CLI, openaiToGeminiCLIRequest);
 registerRequest(FORMATS.OPENAI, FORMATS.CLAUDE, openaiToClaudeRequest);
+registerRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, openaiToCodexRequest);
 
 function normalizeThinkingConfig(body) {
   if (!body?.thinking || !Array.isArray(body.messages) || body.messages.length === 0) {
