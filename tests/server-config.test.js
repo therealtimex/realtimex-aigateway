@@ -29,4 +29,5 @@ test("server config resolves enabled local proxy from env", () => {
   assert.equal(config.localProxy.status, "configured");
   assert.equal(config.localProxy.baseUrl, "http://127.0.0.1:21000");
   assert.equal(config.localProxy.port, 21000);
+  assert.equal(config.execution.provider, "gemini-cli");
 });

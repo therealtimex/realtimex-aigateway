@@ -12,6 +12,12 @@ export function resolveServerConfig(env = process.env) {
   return {
     host: env.AIGATEWAY_HOST ?? "127.0.0.1",
     port: Number.isFinite(port) ? port : 4010,
+    execution: {
+      provider: env.AIGATEWAY_EXECUTION_PROVIDER ?? "gemini-cli",
+      baseUrl:
+        env.AIGATEWAY_EXECUTION_BASE_URL ??
+        "https://cloudcode-pa.googleapis.com/v1internal",
+    },
     localProxy: {
       enabled: proxyEnabled,
       status: proxyEnabled ? "configured" : "disabled",
