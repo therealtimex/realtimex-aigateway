@@ -6,6 +6,7 @@ import { handleHostedChatCore } from "../vendor/9router/open-sse/handlers/chatCo
 import { createTerminalGovernancePluginRuntime } from "../plugin/runtime.js";
 import { resolveServerConfig } from "./config.js";
 import { handleAntigravityIngress } from "../gateway/handleAntigravityIngress.js";
+import { passThroughNativeRequest } from "./nativePassThrough.js";
 
 function jsonResponse(response, status, payload) {
   response.writeHead(status, {
@@ -14,7 +15,7 @@ function jsonResponse(response, status, payload) {
   response.end(JSON.stringify(payload, null, 2));
 }
 
-async function readJsonBody(request) {
+async function readRequestBody(request) {
   const chunks = [];
 
   for await (const chunk of request) {
@@ -22,7 +23,20 @@ async function readJsonBody(request) {
   }
 
   const rawBody = Buffer.concat(chunks).toString("utf8");
-  return rawBody ? JSON.parse(rawBody) : {};
+  let json = null;
+
+  if (rawBody) {
+    try {
+      json = JSON.parse(rawBody);
+    } catch {
+      json = null;
+    }
+  }
+
+  return {
+    rawBody,
+    json,
+  };
 }
 
 async function sendFetchResponse(response, webResponse) {
@@ -34,6 +48,14 @@ async function sendFetchResponse(response, webResponse) {
     status: webResponse.status,
     headers,
     body,
+  };
+}
+
+async function sendPluginResponse(response, pluginResponse) {
+  response.writeHead(pluginResponse.status, pluginResponse.headers);
+  response.end(pluginResponse.body);
+  return {
+    status: pluginResponse.status,
   };
 }
 
@@ -62,6 +84,24 @@ function createInstrumentedAdapter(baseAdapter, runtime) {
   });
 }
 
+function isAntigravityRequest({ headers = {}, body = null } = {}) {
+  const userAgent = String(headers["user-agent"] || "")
+    .trim()
+    .toLowerCase();
+  const bodyUserAgent = String(body?.userAgent || "")
+    .trim()
+    .toLowerCase();
+  const requestType = String(body?.requestType || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    userAgent.includes("antigravity") ||
+    bodyUserAgent === "antigravity" ||
+    requestType === "agent"
+  );
+}
+
 export function createGatewayRequestListener({
   runtime = createTerminalGovernancePluginRuntime(),
   adapter = createHostAdapter(),
@@ -70,6 +110,7 @@ export function createGatewayRequestListener({
 } = {}) {
   return async function gatewayRequestListener(request, response) {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    const requestId = randomUUID();
 
     if (request.method === "GET" && url.pathname === "/health") {
       const dashboard = runtime.getDashboard();
@@ -82,102 +123,102 @@ export function createGatewayRequestListener({
       });
     }
 
-    if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
-      const requestId = randomUUID();
+    if (request.method === "POST") {
       runtime.recordIngress({
         requestId,
         method: request.method,
-        path: url.pathname,
+        path: `${url.pathname}${url.search || ""}`,
       });
-      const body = await readJsonBody(request);
-      const result = await handleHostedChatCore({
-        body,
-        adapter,
-        fetchFn,
-        execution: config.execution,
-        connectionId: requestId,
-        request: {
-          path: url.pathname,
-          headers: request.headers,
-        },
-      });
-      const delivered = await sendFetchResponse(response, result.response);
-      runtime.recordDelivery({
-        requestId,
-        method: request.method,
-        path: url.pathname,
-        status: delivered.status,
-      });
-      return;
-    }
+      const body = await readRequestBody(request);
 
-    if (request.method === "POST" && url.pathname === "/v1internal:generateContent") {
-      const requestId = randomUUID();
-      runtime.recordIngress({
+      const nativePassThroughResponse = await passThroughNativeRequest({
+        requestUrl: url,
+        requestHeaders: request.headers,
+        requestMethod: request.method,
+        rawBody: body.rawBody,
+        parsedBody: body.json,
         requestId,
-        method: request.method,
-        path: url.pathname,
-      });
-      const body = await readJsonBody(request);
-      const result = await handleAntigravityIngress({
-        body,
-        adapter,
         fetchFn,
-        execution: config.execution,
-        connectionId: requestId,
-        request: {
-          path: url.pathname,
-          headers: request.headers,
-        },
-        stream: false,
+        adapter,
       });
-      const delivered = await sendFetchResponse(response, result.response);
-      runtime.recordDelivery({
-        requestId,
-        method: request.method,
-        path: url.pathname,
-        status: delivered.status,
-      });
-      return;
-    }
 
-    if (request.method === "POST" && url.pathname === "/v1internal:streamGenerateContent") {
-      const requestId = randomUUID();
-      runtime.recordIngress({
-        requestId,
-        method: request.method,
-        path: url.pathname,
-      });
-      const body = await readJsonBody(request);
-      const result = await handleAntigravityIngress({
-        body,
-        adapter,
-        fetchFn,
-        execution: config.execution,
-        connectionId: requestId,
-        request: {
+      if (nativePassThroughResponse) {
+        const delivered = await sendFetchResponse(response, nativePassThroughResponse);
+        runtime.recordDelivery({
+          requestId,
+          method: request.method,
+          path: `${url.pathname}${url.search || ""}`,
+          status: delivered.status,
+        });
+        return;
+      }
+
+      if (url.pathname === "/v1/chat/completions") {
+        const result = await handleHostedChatCore({
+          body: body.json || {},
+          adapter,
+          fetchFn,
+          execution: config.execution,
+          connectionId: requestId,
+          request: {
+            path: url.pathname,
+            headers: request.headers,
+          },
+        });
+        const delivered = await sendFetchResponse(response, result.response);
+        runtime.recordDelivery({
+          requestId,
+          method: request.method,
           path: url.pathname,
+          status: delivered.status,
+        });
+        return;
+      }
+
+      if (
+        (url.pathname === "/v1internal:generateContent" ||
+          url.pathname === "/v1internal:streamGenerateContent") &&
+        isAntigravityRequest({
           headers: request.headers,
-        },
-        stream: true,
-      });
-      const delivered = await sendFetchResponse(response, result.response);
-      runtime.recordDelivery({
-        requestId,
-        method: request.method,
-        path: url.pathname,
-        status: delivered.status,
-      });
-      return;
+          body: body.json,
+        })
+      ) {
+        const result = await handleAntigravityIngress({
+          body: body.json || {},
+          adapter,
+          fetchFn,
+          execution: config.execution,
+          connectionId: requestId,
+          request: {
+            path: url.pathname,
+            headers: request.headers,
+          },
+          stream: url.pathname === "/v1internal:streamGenerateContent",
+        });
+        const delivered = await sendFetchResponse(response, result.response);
+        runtime.recordDelivery({
+          requestId,
+          method: request.method,
+          path: `${url.pathname}${url.search || ""}`,
+          status: delivered.status,
+        });
+        return;
+      }
     }
 
     const pluginResponse = runtime.handleRequest({
       method: request.method,
       path: url.pathname,
     });
-
-    response.writeHead(pluginResponse.status, pluginResponse.headers);
-    response.end(pluginResponse.body);
+    const delivered = await sendPluginResponse(response, pluginResponse);
+    if (request.method === "POST") {
+      runtime.recordDelivery({
+        requestId,
+        method: request.method,
+        path: `${url.pathname}${url.search || ""}`,
+        status: delivered.status,
+      });
+    }
   };
 }
 
@@ -196,38 +237,70 @@ export function createGatewayServer(options = {}) {
     config,
   });
   const server = http.createServer(requestListener);
+  const proxyServer = config.localProxy?.enabled
+    ? http.createServer(requestListener)
+    : null;
+
+  async function listenServer(targetServer, { host, port }) {
+    await new Promise((resolve, reject) => {
+      targetServer.once("error", reject);
+      targetServer.listen(port, host, () => {
+        targetServer.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = targetServer.address();
+    return {
+      host: typeof address === "object" && address ? address.address : host,
+      port: typeof address === "object" && address ? address.port : port,
+    };
+  }
+
+  async function closeServer(targetServer) {
+    if (!targetServer || !targetServer.listening) {
+      return;
+    }
+
+    await new Promise((resolve, reject) => {
+      targetServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
 
   return {
     config,
     runtime,
     server,
+    proxyServer,
     async start({ host = config.host, port = config.port } = {}) {
-      await new Promise((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(port, host, () => {
-          server.off("error", reject);
-          resolve();
+      const primaryAddress = await listenServer(server, { host, port });
+
+      if (proxyServer) {
+        const proxyAddress = await listenServer(proxyServer, {
+          host: config.localProxy.host || "127.0.0.1",
+          port: config.localProxy.port,
         });
-      });
+        runtime.setLocalProxyState({
+          enabled: true,
+          status: "listening",
+          baseUrl: `http://${proxyAddress.host}:${proxyAddress.port}`,
+          port: proxyAddress.port,
+        });
+      }
 
       runtime.setRuntimeStatus("listening");
 
-      const address = server.address();
       return {
-        host: typeof address === "object" && address ? address.address : host,
-        port: typeof address === "object" && address ? address.port : port,
+        host: primaryAddress.host,
+        port: primaryAddress.port,
       };
     },
     async stop() {
-      if (!server.listening) {
-        runtime.setRuntimeStatus("stopped");
-        return;
-      }
-
-      await new Promise((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()));
+      await closeServer(proxyServer);
+      await closeServer(server);
+      runtime.setLocalProxyState({
+        status: config.localProxy?.enabled ? "stopped" : "disabled",
       });
-
       runtime.setRuntimeStatus("stopped");
     },
   };

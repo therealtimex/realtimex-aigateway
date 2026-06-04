@@ -37,6 +37,9 @@ export function createTerminalGovernancePluginRuntime(options = {}) {
     setRuntimeStatus(runtimeStatus) {
       state.runtimeStatus = runtimeStatus;
     },
+    setLocalProxyState(nextState = {}) {
+      telemetry.setLocalProxyState(nextState);
+    },
     recordIngress(event = {}) {
       telemetry.recordIngress(event);
     },

@@ -124,6 +124,30 @@ test("dashboard runtime reflects recorded telemetry in analytics and local proxy
   assert.match(payload.localProxy.notes[payload.localProxy.notes.length - 2], /Latest ingress: POST \/v1\/chat\/completions/);
 });
 
+test("dashboard runtime updates local proxy state dynamically", () => {
+  const runtime = createTerminalGovernancePluginRuntime({
+    localProxy: {
+      enabled: true,
+      status: "configured",
+      baseUrl: "http://127.0.0.1:20128",
+      port: 20128,
+      source: "plugin",
+      notes: [],
+    },
+  });
+
+  runtime.setLocalProxyState({
+    status: "listening",
+    baseUrl: "http://127.0.0.1:20999",
+    port: 20999,
+  });
+
+  const payload = runtime.getDashboard();
+  assert.equal(payload.localProxy.status, "listening");
+  assert.equal(payload.localProxy.baseUrl, "http://127.0.0.1:20999");
+  assert.equal(payload.localProxy.port, 20999);
+});
+
 test("dashboard runtime returns 404 for unknown routes", () => {
   const runtime = createTerminalGovernancePluginRuntime();
   const response = runtime.handleRequest({

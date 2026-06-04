@@ -22,6 +22,7 @@ export function resolveServerConfig(env = process.env) {
       enabled: proxyEnabled,
       status: proxyEnabled ? "configured" : "disabled",
       baseUrl: proxyBaseUrl,
+      host: proxyHost,
       port: Number.isFinite(proxyPort) ? proxyPort : 20128,
       source: "plugin",
       notes: proxyEnabled

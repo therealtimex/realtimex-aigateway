@@ -32,7 +32,8 @@ function buildRecentEntry(event = {}) {
 }
 
 export function createDashboardTelemetry({ localProxy = null } = {}) {
-  const baseLocalProxy = localProxy && typeof localProxy === "object" ? localProxy : {};
+  const baseLocalProxy =
+    localProxy && typeof localProxy === "object" ? { ...localProxy } : {};
   const state = {
     requestIds: new Set(),
     ingressCount: 0,
@@ -53,6 +54,10 @@ export function createDashboardTelemetry({ localProxy = null } = {}) {
   }
 
   return {
+    setLocalProxyState(nextState = {}) {
+      Object.assign(baseLocalProxy, nextState);
+    },
+
     recordIngress(event = {}) {
       const requestId = event.requestId || event.connectionId || `ingress-${Date.now()}`;
       state.requestIds.add(requestId);

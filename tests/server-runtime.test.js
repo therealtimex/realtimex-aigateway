@@ -45,7 +45,7 @@ test("gateway server exposes /health and /dashboard", async (t) => {
   assert.equal(dashboardBody.contract.route, "/dashboard");
   assert.equal(dashboardBody.plugin.slug, "realtimex-aigateway");
   assert.equal(dashboardBody.plugin.runtimeStatus, "listening");
-  assert.equal(dashboardBody.localProxy.status, "configured");
+  assert.equal(dashboardBody.localProxy.status, "listening");
 });
 
 test("gateway server returns 404 for unknown routes", async (t) => {
@@ -57,10 +57,121 @@ test("gateway server returns 404 for unknown routes", async (t) => {
   });
 
   const response = await fetch(`http://${address.host}:${address.port}/nope`);
-  assert.equal(response.status, 404);
+  assert.ok(response.status >= 400);
 
   const body = await response.json();
   assert.equal(body.error, "route-not-found");
+});
+
+test("gateway server records ingress on proxy listener for unsupported native CLI paths", async (t) => {
+  const gateway = createGatewayServer({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      localProxy: {
+        enabled: true,
+        status: "configured",
+        host: "127.0.0.1",
+        baseUrl: "http://127.0.0.1:0",
+        port: 0,
+        source: "plugin",
+        notes: [],
+      },
+    },
+  });
+
+  const address = await gateway.start({ host: "127.0.0.1", port: 0 });
+
+  t.after(async () => {
+    await gateway.stop();
+  });
+
+  const proxyAddress = gateway.proxyServer.address();
+  const response = await fetch(
+    `http://${proxyAddress.address}:${proxyAddress.port}/v1internal:loadCodeAssist`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ projectId: "demo-project" }),
+    },
+  );
+
+  assert.ok(response.status >= 400);
+
+  const dashboardResponse = await fetch(
+    `http://${address.host}:${address.port}/dashboard`,
+  );
+  const dashboardBody = await dashboardResponse.json();
+  assert.equal(dashboardBody.analytics.summary.trackedRequests, 1);
+  assert.equal(dashboardBody.analytics.summary.proxyIngressRequests, 1);
+  assert.match(dashboardBody.localProxy.notes.join(" "), /Latest ingress: POST \/v1internal:loadCodeAssist/);
+});
+
+test("gateway server passes through native codex responses requests", async (t) => {
+  let capturedRequest = null;
+  const gateway = createGatewayServer({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      localProxy: {
+        enabled: false,
+        status: "disabled",
+        baseUrl: null,
+        port: 20128,
+        source: "plugin",
+        notes: [],
+      },
+    },
+    fetchFn: async (url, options = {}) => {
+      capturedRequest = { url, options };
+      return {
+        status: 200,
+        headers: new Headers({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        async text() {
+          return JSON.stringify({
+            id: "resp_123",
+            status: "completed",
+          });
+        },
+      };
+    },
+  });
+
+  const address = await gateway.start({ host: "127.0.0.1", port: 0 });
+
+  t.after(async () => {
+    await gateway.stop();
+  });
+
+  const response = await fetch(
+    `http://${address.host}:${address.port}/backend-api/codex/responses`,
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer codex-token",
+        "content-type": "application/json",
+        "user-agent": "codex-cli/1.0.18",
+      },
+      body: JSON.stringify({
+        model: "gpt-5-codex",
+        input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      }),
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(capturedRequest.url, "https://chatgpt.com/backend-api/codex/responses");
+
+  const dashboardResponse = await fetch(
+    `http://${address.host}:${address.port}/dashboard`,
+  );
+  const dashboardBody = await dashboardResponse.json();
+  assert.equal(dashboardBody.analytics.summary.trackedRequests, 1);
+  assert.equal(dashboardBody.analytics.summary.upstreamDispatches, 1);
 });
 
 test("gateway server executes hosted gemini chat via injected adapter and fetch", async (t) => {
