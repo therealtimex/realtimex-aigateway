@@ -1,43 +1,6 @@
-import { executeGeminiChat } from "../../../../providers/gemini/executeGeminiChat.js";
-import { executeQwenChat } from "../../../../providers/qwen/executeQwenChat.js";
-import { executeClaudeChat } from "../../../../providers/claude/executeClaudeChat.js";
-import { executeCodexChat } from "../../../../providers/codex/executeCodexChat.js";
-import { FORMATS, detectRequestFormat, translateRequest } from "../../../../translator/index.js";
+import { buildHostedExecutionPlan } from "../../../../gateway/buildHostedExecutionPlan.js";
 import { createErrorResult, buildErrorBody } from "../utils/error.js";
-import { createRequestLogger } from "../utils/requestLogger.js";
 import { handleHostedNonStreamingResponse } from "./chatCore/nonStreamingHandler.js";
-
-function resolveTargetFormat(provider) {
-  switch (provider) {
-    case "gemini-cli":
-      return FORMATS.GEMINI_CLI;
-    case "gemini":
-      return FORMATS.GEMINI;
-    case "qwen":
-      return FORMATS.OPENAI;
-    case "claude":
-      return FORMATS.CLAUDE;
-    case "codex":
-      return FORMATS.OPENAI_RESPONSES;
-    default:
-      throw new Error(`Unsupported execution provider: ${provider}`);
-  }
-}
-
-function resolveProviderRunner(provider) {
-  switch (provider) {
-    case "gemini-cli":
-      return executeGeminiChat;
-    case "qwen":
-      return executeQwenChat;
-    case "claude":
-      return executeClaudeChat;
-    case "codex":
-      return executeCodexChat;
-    default:
-      throw new Error(`Unsupported execution provider: ${provider}`);
-  }
-}
 
 export async function handleHostedChatCore({
   body,
@@ -53,46 +16,22 @@ export async function handleHostedChatCore({
     return createErrorResult(400, "Chat request is missing model");
   }
 
-  const provider = execution.provider ?? "gemini-cli";
-  let targetFormat;
-
+  let plan;
   try {
-    targetFormat = resolveTargetFormat(provider);
-  } catch (error) {
-    return createErrorResult(400, error.message);
-  }
-
-  const sourceFormat = detectRequestFormat(request.path ?? "/v1/chat/completions", body);
-  const requestLogger = await createRequestLogger(sourceFormat, targetFormat, model, adapter);
-
-  requestLogger.logClientRawRequest(request.path ?? "/v1/chat/completions", body, request.headers ?? {});
-  requestLogger.logRawRequest(body, request.headers ?? {});
-
-  let translatedRequest;
-  try {
-    translatedRequest = translateRequest({
-      sourceFormat,
-      targetFormat,
-      model,
+    plan = await buildHostedExecutionPlan({
       body,
-      stream: body.stream === true,
-      requestLogger,
+      execution,
+      adapter,
+      request,
     });
   } catch (error) {
-    requestLogger.logError(error, body);
     return createErrorResult(400, error.message);
   }
 
-  let runProvider;
-  try {
-    runProvider = resolveProviderRunner(provider);
-  } catch (error) {
-    requestLogger.logError(error, translatedRequest);
-    return createErrorResult(400, error.message);
-  }
+  const { provider, requestLogger, translatedRequest, providerEntry } = plan;
 
   try {
-    const result = await runProvider({
+    const result = await providerEntry.runner({
       model,
       body,
       adapter,
