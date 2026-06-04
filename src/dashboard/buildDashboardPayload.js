@@ -32,7 +32,9 @@ function buildDefaultLocalProxy() {
 }
 
 export function buildDashboardPayload(options = {}) {
-  const agents = options.catalog?.agents ?? buildDefaultCatalog();
+  const agents =
+    options.catalog?.agents ??
+    buildDefaultCatalog({ commandDetector: options.commandDetector });
   const pluginState = options.pluginState ?? {};
   const pluginConfig = options.plugin ?? {};
 

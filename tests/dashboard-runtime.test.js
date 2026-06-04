@@ -6,6 +6,9 @@ import { createTerminalGovernancePluginRuntime } from "../src/plugin/runtime.js"
 
 test("dashboard runtime returns a contract-backed payload with supported agents", () => {
   const runtime = createTerminalGovernancePluginRuntime({
+    commandDetector() {
+      return false;
+    },
     localProxy: {
       enabled: true,
       status: "configured",
@@ -24,6 +27,9 @@ test("dashboard runtime returns a contract-backed payload with supported agents"
   assert.equal(payload.catalog.summary.uninstalled, 5);
   assert.equal(payload.catalog.summary.docsLinked, 5);
   assert.equal(payload.catalog.summary.forwardable, 4);
+  assert.equal(payload.catalog.agents[0].canonical, "gemini");
+  assert.equal(payload.catalog.agents[0].label, "Gemini");
+  assert.equal(payload.catalog.agents[0].installed, false);
   assert.equal(payload.analytics.source, "plugin");
   assert.equal(payload.localProxy.source, "plugin");
   assert.equal(payload.localProxy.enabled, true);
@@ -32,7 +38,11 @@ test("dashboard runtime returns a contract-backed payload with supported agents"
 });
 
 test("dashboard runtime serves GET /dashboard and returns JSON", () => {
-  const runtime = createTerminalGovernancePluginRuntime();
+  const runtime = createTerminalGovernancePluginRuntime({
+    commandDetector(command) {
+      return command === "gemini";
+    },
+  });
   const response = runtime.handleRequest({
     method: "GET",
     path: DASHBOARD_ROUTE,
@@ -47,6 +57,7 @@ test("dashboard runtime serves GET /dashboard and returns JSON", () => {
   const body = JSON.parse(response.body);
   assert.equal(body.contract.route, DASHBOARD_ROUTE);
   assert.equal(body.plugin.displayName, "RealtimeX AI Gateway");
+  assert.equal(body.catalog.summary.installed, 1);
 });
 
 test("dashboard runtime returns 404 for unknown routes", () => {
