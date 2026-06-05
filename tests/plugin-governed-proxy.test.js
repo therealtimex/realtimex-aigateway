@@ -125,3 +125,54 @@ test("governed proxy returns plugin-owned 503 when embedded gateway cold-start f
     "Failed to start embedded gateway for governed request",
   );
 });
+
+test("governed relay strips compression transport headers before streaming body", async () => {
+  const { relayFetchResponse } = loadStagedPluginRuntime();
+  const responseState = {
+    statusCode: null,
+    headers: {},
+    chunks: [],
+    ended: false,
+  };
+  const response = {
+    status(code) {
+      responseState.statusCode = code;
+      return this;
+    },
+    setHeader(name, value) {
+      responseState.headers[String(name || "").toLowerCase()] = value;
+      return this;
+    },
+    write(chunk) {
+      responseState.chunks.push(Buffer.from(chunk).toString("utf8"));
+      return true;
+    },
+    end() {
+      responseState.ended = true;
+      return this;
+    },
+  };
+
+  const gatewayResponse = new Response("decoded-body", {
+    status: 200,
+    headers: {
+      "content-encoding": "gzip",
+      "content-length": "999",
+      "transfer-encoding": "chunked",
+      "content-type": "text/plain; charset=utf-8",
+    },
+  });
+
+  await relayFetchResponse({ gatewayResponse, response });
+
+  assert.equal(responseState.statusCode, 200);
+  assert.equal(responseState.headers["content-encoding"], undefined);
+  assert.equal(responseState.headers["content-length"], undefined);
+  assert.equal(responseState.headers["transfer-encoding"], undefined);
+  assert.equal(
+    responseState.headers["content-type"],
+    "text/plain; charset=utf-8",
+  );
+  assert.deepEqual(responseState.chunks, ["decoded-body"]);
+  assert.equal(responseState.ended, true);
+});
