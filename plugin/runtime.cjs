@@ -649,12 +649,28 @@ async function getLaunchContextPayload({ api, request }) {
   });
 }
 
-async function proxyGovernedRequest({ api, pluginDir, request, response }) {
+async function proxyGovernedRequest({
+  api,
+  pluginDir,
+  request,
+  response,
+  ensureGatewayProcessImpl = ensureGatewayProcess,
+} = {}) {
   const config = readConfig(api);
   const gatewayUrl = buildGatewayUrl(config);
 
   if (config.autoStart && state.runtimeStatus !== "listening") {
-    await ensureGatewayProcess({ api, pluginDir });
+    try {
+      await ensureGatewayProcessImpl({ api, pluginDir });
+    } catch (error) {
+      state.lastError = error?.message || String(error || "Gateway startup failed");
+      api.log.warn("Failed to start embedded gateway for governed request", {
+        error: state.lastError,
+        method: request?.method,
+        path: request?.path,
+        subPath: request?.subPath,
+      });
+    }
   }
 
   if (state.runtimeStatus !== "listening") {
