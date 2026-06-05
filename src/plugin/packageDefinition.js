@@ -1,9 +1,21 @@
 export const REALTIMEX_AIGATEWAY_PLUGIN_ID = "com.realtimex.aigateway";
 export const REALTIMEX_AIGATEWAY_PLUGIN_NAME = "realtimex-aigateway";
 export const REALTIMEX_AIGATEWAY_PLUGIN_DISPLAY_NAME = "RealtimeX AI Gateway";
+export const GOVERNED_PLUGIN_ROUTE_PREFIX = "/_rtx/governed";
+export const GOVERNED_PLUGIN_ROUTE_METHODS = ["GET", "POST"];
 
 export function buildReleaseAssetBaseName({ version }) {
   return `${REALTIMEX_AIGATEWAY_PLUGIN_NAME}-plugin-${version}`;
+}
+
+export function buildGovernedPluginRouteDescriptors() {
+  return GOVERNED_PLUGIN_ROUTE_METHODS.map((method) => ({
+    method,
+    path: GOVERNED_PLUGIN_ROUTE_PREFIX,
+    match: "prefix",
+    description:
+      "Forwards governed local-proxy traffic to the embedded AI Gateway runtime.",
+  }));
 }
 
 export function buildPluginManifest({ version }) {
@@ -34,6 +46,7 @@ export function buildPluginManifest({ version }) {
           description:
             "Builds generic launch context for governed terminal agent sessions.",
         },
+        ...buildGovernedPluginRouteDescriptors(),
       ],
     },
     configSchema: [

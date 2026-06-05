@@ -50,6 +50,7 @@ const GEMINI_PROXY_ENV_KEYS = [
 ];
 const CURSOR_PROXY_ENV_KEYS = ["CURSOR_API_ENDPOINT"];
 const GOVERNED_ROUTE_PREFIX = "/_rtx/governed";
+const GOVERNED_ROUTE_METHODS = ["GET", "POST"];
 const FORWARDED_PROVIDERS_BY_AGENT = {
   qwen: new Set(["openrouter"]),
 };
@@ -347,6 +348,93 @@ async function fetchJson(url) {
   return response.json();
 }
 
+function shouldSendRequestBody(method = "GET") {
+  return !["GET", "HEAD"].includes(String(method || "GET").toUpperCase());
+}
+
+function normalizeForwardHeaders(headers = {}) {
+  const next = {};
+  for (const [key, value] of Object.entries(headers || {})) {
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    if (!normalizedKey) continue;
+    if (["host", "connection", "content-length"].includes(normalizedKey)) continue;
+    next[normalizedKey] = value;
+  }
+  return next;
+}
+
+function buildGovernedProxyTargetUrl({ gatewayUrl, request }) {
+  const subPath =
+    typeof request?.subPath === "string" && request.subPath.trim()
+      ? request.subPath
+      : "/";
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(request?.query || {})) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item !== "undefined") {
+          query.append(key, String(item));
+        }
+      }
+      continue;
+    }
+    if (typeof value !== "undefined") {
+      query.set(key, String(value));
+    }
+  }
+  const querySuffix = query.size > 0 ? `?${query.toString()}` : "";
+  return `${gatewayUrl}${GOVERNED_ROUTE_PREFIX}${subPath}${querySuffix}`;
+}
+
+function buildGovernedProxyRequestInit(request = {}) {
+  const method = String(request?.method || "GET").trim().toUpperCase();
+  const headers = normalizeForwardHeaders(request?.headers || {});
+  const init = {
+    method,
+    headers,
+  };
+
+  if (!shouldSendRequestBody(method)) {
+    return init;
+  }
+
+  const body = request?.body;
+  if (typeof body === "undefined" || body === null) {
+    return init;
+  }
+
+  if (Buffer.isBuffer(body) || typeof body === "string") {
+    init.body = body;
+    return init;
+  }
+
+  init.body = JSON.stringify(body);
+  if (!headers["content-type"]) {
+    headers["content-type"] = "application/json";
+  }
+  return init;
+}
+
+async function relayFetchResponse({ gatewayResponse, response }) {
+  response.status(gatewayResponse.status);
+  for (const [key, value] of gatewayResponse.headers.entries()) {
+    if (String(key || "").trim().toLowerCase() === "content-length") continue;
+    response.setHeader(key, value);
+  }
+
+  const reader = gatewayResponse.body?.getReader?.();
+  if (!reader) {
+    return response.end();
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    response.write(Buffer.from(value));
+  }
+  return response.end();
+}
+
 async function waitForGatewayReady({ api, gatewayUrl, child }) {
   const deadline = Date.now() + 5000;
 
@@ -561,9 +649,69 @@ async function getLaunchContextPayload({ api, request }) {
   });
 }
 
+async function proxyGovernedRequest({
+  api,
+  pluginDir,
+  request,
+  response,
+  ensureGatewayProcessImpl = ensureGatewayProcess,
+} = {}) {
+  const config = readConfig(api);
+  const gatewayUrl = buildGatewayUrl(config);
+
+  if (config.autoStart && state.runtimeStatus !== "listening") {
+    try {
+      await ensureGatewayProcessImpl({ api, pluginDir });
+    } catch (error) {
+      state.lastError = error?.message || String(error || "Gateway startup failed");
+      api.log.warn("Failed to start embedded gateway for governed request", {
+        error: state.lastError,
+        method: request?.method,
+        path: request?.path,
+        subPath: request?.subPath,
+      });
+    }
+  }
+
+  if (state.runtimeStatus !== "listening") {
+    const message =
+      state.lastError ||
+      "Embedded gateway is not listening for governed proxy requests.";
+    return response.status(503).json({
+      error: "gateway-unavailable",
+      message,
+    });
+  }
+
+  try {
+    const gatewayResponse = await fetch(
+      buildGovernedProxyTargetUrl({ gatewayUrl, request }),
+      buildGovernedProxyRequestInit(request),
+    );
+    return await relayFetchResponse({ gatewayResponse, response });
+  } catch (error) {
+    state.lastError = error.message;
+    api.log.warn("Failed to proxy governed request through embedded gateway", {
+      error: error.message,
+      method: request?.method,
+      path: request?.path,
+      subPath: request?.subPath,
+    });
+    return response.status(502).json({
+      error: "gateway-proxy-failed",
+      message: error.message,
+    });
+  }
+}
+
 module.exports = {
   ensureGatewayProcess,
   stopGatewayProcess,
   getDashboardPayload,
   getLaunchContextPayload,
+  proxyGovernedRequest,
+  GOVERNED_ROUTE_PREFIX,
+  GOVERNED_ROUTE_METHODS,
+  buildGovernedProxyTargetUrl,
+  buildGovernedProxyRequestInit,
 };
