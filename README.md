@@ -78,17 +78,25 @@ Artifacts are written to `dist/`:
 
 ## GitHub Release CI
 
-GitHub Actions builds release artifacts in `.github/workflows/release.yml`.
+GitHub Actions now split validation from publication:
 
-- `workflow_dispatch`
+- `.github/workflows/ci.yml`
+  - runs on pull requests and `main` pushes
   - runs tests
-  - builds the plugin zip
-  - uploads the zip and checksum as workflow artifacts
-- `push` tag `v*`
-  - verifies the tag matches `package.json` version
-  - runs tests
-  - builds the plugin zip
+  - builds the plugin zip to prove the packaging path before release
+- `.github/workflows/release.yml`
+  - runs only on `main` pushes or manual dispatch on `main`
+  - reads `package.json` version and treats `v<version>` as the release tag
+  - skips ordinary `main` merges when the version did not change
+  - fails if that tag already exists on a different commit, instead of publishing from a branch-cut tag
+  - creates the git tag from the merged `main` revision
   - publishes a GitHub Release with the zip and checksum attached
+
+Operational note:
+
+- version bumps still happen in normal PRs
+- publishing happens only after that PR lands on `main`
+- manual tag pushes are no longer the release trigger
 
 ## Planned Provider Families
 

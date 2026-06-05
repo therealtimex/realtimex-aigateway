@@ -2,41 +2,101 @@ name: Release Plugin
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Verify tag matches package version
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Resolve release version and tag policy
+        id: release
         shell: bash
         run: |
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error title=Release must run on main::This workflow only publishes from main."
+            exit 1
+          fi
+
           VERSION="$(node -p "require('./package.json').version")"
-          TAG="${GITHUB_REF_NAME}"
-          test "v${VERSION}" = "${TAG}"
+          TAG="v${VERSION}"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          PREVIOUS_VERSION=""
+
+          if [ "${{ github.event_name }}" = "push" ] && git cat-file -e "${{ github.event.before }}:package.json" 2>/dev/null; then
+            PREVIOUS_VERSION="$(
+              git show "${{ github.event.before }}:package.json" | \
+              node -e "const fs = require('fs'); const input = fs.readFileSync(0, 'utf8').trim(); process.stdout.write(input ? JSON.parse(input).version : '')"
+            )"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "previous_version=${PREVIOUS_VERSION}" >> "$GITHUB_OUTPUT"
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            TAG_SHA="$(git rev-list -n 1 "${TAG}")"
+
+            if [ "${TAG_SHA}" = "${HEAD_SHA}" ]; then
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              echo "skip_reason=Tag already points at HEAD" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if [ "${PREVIOUS_VERSION}" = "${VERSION}" ]; then
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              echo "skip_reason=Version unchanged on main and tag already exists" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "::error title=Conflicting release tag::${TAG} already exists at ${TAG_SHA}, but main is at ${HEAD_SHA}. Bump package.json before merging or intentionally replace the conflicting tag."
+            exit 1
+          fi
+
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Skip duplicate release
+        if: steps.release.outputs.should_release != 'true'
+        run: echo "${{ steps.release.outputs.skip_reason }}"
 
       - name: Run test suite
+        if: steps.release.outputs.should_release == 'true'
         run: npm test
 
       - name: Build plugin release artifact
+        if: steps.release.outputs.should_release == 'true'
         run: npm run build:plugin
 
+      - name: Create git tag from main
+        if: steps.release.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.release.outputs.tag }}"
+          git push origin "${{ steps.release.outputs.tag }}"
+
       - name: Upload release artifacts
+        if: steps.release.outputs.should_release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: realtimex-aigateway-plugin
@@ -45,11 +105,11 @@ jobs:
             dist/*.sha256
 
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.release.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release.outputs.tag }}
           generate_release_notes: true
           files: |
             dist/*.zip
             dist/*.sha256
-
