@@ -10,6 +10,7 @@ export async function handleHostedChatCore({
   log,
   connectionId = null,
   request = {},
+  routing = null,
 }) {
   const model = body?.model;
   if (!model) {
@@ -23,12 +24,13 @@ export async function handleHostedChatCore({
       execution,
       adapter,
       request,
+      routing,
     });
   } catch (error) {
     return createErrorResult(400, error.message);
   }
 
-  const { provider, requestLogger, translatedRequest, providerEntry } = plan;
+  const { provider, requestLogger, translatedRequest, providerEntry, baseUrl } = plan;
 
   try {
     const result = await providerEntry.runner({
@@ -39,7 +41,7 @@ export async function handleHostedChatCore({
       stream: body.stream === true,
       log,
       connectionId,
-      baseUrl: execution.baseUrl,
+      baseUrl,
       translatedRequest,
       requestLogger,
     });

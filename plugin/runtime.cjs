@@ -49,6 +49,10 @@ const GEMINI_PROXY_ENV_KEYS = [
   "CODE_ASSIST_ENDPOINT",
 ];
 const CURSOR_PROXY_ENV_KEYS = ["CURSOR_API_ENDPOINT"];
+const GOVERNED_ROUTE_PREFIX = "/_rtx/governed";
+const FORWARDED_PROVIDERS_BY_AGENT = {
+  qwen: new Set(["openrouter"]),
+};
 
 function readConfig(api) {
   const config = api.getConfig();
@@ -104,8 +108,34 @@ function normalizeIdentifier(value = "") {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeForwardedProvider(canonicalAgent, value = "") {
+  const normalizedAgent = normalizeIdentifier(canonicalAgent);
+  const normalizedProvider = normalizeIdentifier(value);
+  if (!normalizedProvider) {
+    return null;
+  }
+
+  const supportedProviders = FORWARDED_PROVIDERS_BY_AGENT[normalizedAgent];
+  if (!supportedProviders || !supportedProviders.has(normalizedProvider)) {
+    return null;
+  }
+
+  return normalizedProvider;
+}
+
 function buildProxyBaseUrl(config) {
   return `http://${config.proxyHost}:${config.proxyPort}`;
+}
+
+function buildGovernedProxyBaseUrl(config, canonicalAgent, forwardedProvider = null) {
+  const routeSegments = [
+    GOVERNED_ROUTE_PREFIX,
+    encodeURIComponent(canonicalAgent),
+  ];
+  if (forwardedProvider) {
+    routeSegments.push("forward", encodeURIComponent(forwardedProvider));
+  }
+  return `${buildProxyBaseUrl(config)}${routeSegments.join("/")}`;
 }
 
 function applyProviderBaseUrlOverrides(env = {}, baseUrl = "") {
@@ -219,6 +249,10 @@ function buildQwenSettingsOverlay({ baseUrl = "", modelId = "" } = {}) {
 
 function buildLaunchContextPayload({ config, body = {} }) {
   const canonicalAgent = normalizeIdentifier(body.canonicalAgent);
+  const forwardedProvider = normalizeForwardedProvider(
+    canonicalAgent,
+    body.forwardedProvider
+  );
   if (!GOVERNED_TERMINAL_AGENTS.has(canonicalAgent)) {
     return {
       governed: false,
@@ -241,15 +275,17 @@ function buildLaunchContextPayload({ config, body = {} }) {
     };
   }
 
-  const baseUrl = buildProxyBaseUrl(config);
+  const baseUrl = buildGovernedProxyBaseUrl(
+    config,
+    canonicalAgent,
+    forwardedProvider
+  );
   const launchEnv = applyProviderBaseUrlOverrides(
     {
       REALTIMEX_AIGATEWAY_ENABLED: "true",
       REALTIMEX_AIGATEWAY_BASE_URL: baseUrl,
       REALTIMEX_AIGATEWAY_CANONICAL_AGENT: canonicalAgent,
-      REALTIMEX_AIGATEWAY_FORWARDED_PROVIDER: String(
-        body.forwardedProvider || ""
-      ).trim(),
+      REALTIMEX_AIGATEWAY_FORWARDED_PROVIDER: forwardedProvider || "",
     },
     baseUrl
   );
@@ -268,11 +304,12 @@ function buildLaunchContextPayload({ config, body = {} }) {
     pluginId: metadata.plugin.manifestId,
     routing: {
       canonicalAgent,
-      forwardedProvider: String(body.forwardedProvider || "").trim() || null,
+      forwardedProvider,
     },
     proxy: {
       enabled: true,
       baseUrl,
+      listenerBaseUrl: buildProxyBaseUrl(config),
     },
     overlays,
   });

@@ -28,10 +28,16 @@ test("buildDefaultCatalog returns host-compatible agent cards with detected inst
 
   assert.ok(codex);
   assert.equal(codex.installed, true);
-  assert.equal(codex.supportsProviderForwarding, true);
+  assert.equal(codex.supportsProviderForwarding, false);
+  assert.deepEqual(codex.forwardableProviders, []);
 
   assert.ok(claude);
   assert.equal(claude.installed, false);
+
+  const qwen = catalog.find((agent) => agent.canonical === "qwen");
+  assert.ok(qwen);
+  assert.equal(qwen.supportsProviderForwarding, true);
+  assert.deepEqual(qwen.forwardableProviders, ["openrouter"]);
 });
 
 test("summarizeCatalog reports supported and installed counts from detected catalog", () => {
@@ -48,6 +54,6 @@ test("summarizeCatalog reports supported and installed counts from detected cata
     installed: 3,
     uninstalled: 2,
     docsLinked: 5,
-    forwardable: 4,
+    forwardable: 1,
   });
 });

@@ -42,6 +42,14 @@ The gateway returns:
 - fallback decisions
 - health and status
 
+For governed terminal sessions, the plugin launch context is the runtime source of truth:
+
+- the launch context hands compatible CLIs a governed local-proxy base URL under `/_rtx/governed/<agent>`
+- forwarded-provider cases extend that path with `/forward/<provider>`
+- the gateway strips that prefix on ingress and resolves provider routing from it for both hosted and native request paths
+- for hosted execution in the shipped embedded runtime, credentials are resolved request-scoped from the inbound governed proxy request when no external host adapter is present
+- unprefixed traffic keeps using the global plugin execution config as the fallback/default path
+
 ### 2. Ingress Adapters
 
 Ingress adapters normalize client traffic into the execution core:
@@ -51,6 +59,12 @@ Ingress adapters normalize client traffic into the execution core:
 - future ACP-native ingress
 
 Ingress adapters do not own policy.
+
+Current governed-routing support:
+
+- Qwen can advertise `forwardableProviders: ["openrouter"]` and route hosted chat traffic accordingly
+- Gemini, Claude, and Codex govern by canonical agent, but do not advertise forwarded-provider support
+- native passthrough remains canonical-agent-specific for Codex, Claude, and Gemini CLI
 
 ### 3. Execution Core
 
@@ -71,6 +85,11 @@ Executors are responsible for:
 - auth refresh
 - upstream transport
 - response normalization
+
+Qwen overlay note:
+
+- Qwen launch overlays currently source `~/.qwen/settings.json` from the local desktop user home directory
+- this plugin treats that overlay source as a single-user desktop assumption, not a multi-user request-scoped contract
 
 ### 5. Trace Pipeline
 

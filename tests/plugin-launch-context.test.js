@@ -82,19 +82,24 @@ test("launch context returns codex proxy launch args and env when proxy is enabl
   assert.equal(payload.governed, true);
   assert.deepEqual(payload.launchArgs, [
     "--config",
-    'chatgpt_base_url="http://127.0.0.1:20128"',
+    'chatgpt_base_url="http://127.0.0.1:20128/_rtx/governed/codex"',
     "--config",
-    'openai_base_url="http://127.0.0.1:20128"',
+    'openai_base_url="http://127.0.0.1:20128/_rtx/governed/codex"',
   ]);
   assert.equal(payload.launchEnv.REALTIMEX_AIGATEWAY_ENABLED, "true");
-  assert.equal(payload.launchEnv.OPENAI_BASE_URL, "http://127.0.0.1:20128");
+  assert.equal(
+    payload.launchEnv.OPENAI_BASE_URL,
+    "http://127.0.0.1:20128/_rtx/governed/codex",
+  );
+  assert.equal(payload.launchEnv.REALTIMEX_AIGATEWAY_FORWARDED_PROVIDER, "");
 
   const context = JSON.parse(
     payload.launchEnv.REALTIMEX_TERMINAL_GOVERNANCE_CONTEXT,
   );
   assert.equal(context.routing.canonicalAgent, "codex");
-  assert.equal(context.routing.forwardedProvider, "openrouter");
-  assert.equal(context.proxy.baseUrl, "http://127.0.0.1:20128");
+  assert.equal(context.routing.forwardedProvider, null);
+  assert.equal(context.proxy.baseUrl, "http://127.0.0.1:20128/_rtx/governed/codex");
+  assert.equal(context.proxy.listenerBaseUrl, "http://127.0.0.1:20128");
 });
 
 test("launch context embeds qwen settings overlay in governance context", async (t) => {
@@ -162,11 +167,17 @@ test("launch context embeds qwen settings overlay in governance context", async 
 
   assert.equal(payload.governed, true);
   assert.equal(overlay.security.auth.selectedType, "openai");
-  assert.equal(overlay.security.auth.baseUrl, "http://127.0.0.1:20128");
+  assert.equal(
+    overlay.security.auth.baseUrl,
+    "http://127.0.0.1:20128/_rtx/governed/qwen",
+  );
   assert.equal(
     overlay.modelProviders.openai[0].baseUrl,
-    "http://127.0.0.1:20128",
+    "http://127.0.0.1:20128/_rtx/governed/qwen",
   );
-  assert.equal(overlay.env.OPENAI_BASE_URL, "http://127.0.0.1:20128");
+  assert.equal(
+    overlay.env.OPENAI_BASE_URL,
+    "http://127.0.0.1:20128/_rtx/governed/qwen",
+  );
   assert.equal(overlay.env.OPENROUTER_API_KEY, "sk-or-test");
 });
