@@ -38,4 +38,20 @@ test("stagePluginRelease writes an installable plugin layout", () => {
       (route) => route.method === "POST" && route.path === "/launch-context",
     ),
   );
+  assert.ok(
+    manifest.capabilities.api_routes.some(
+      (route) =>
+        route.method === "GET" &&
+        route.path === "/_rtx/governed" &&
+        route.match === "prefix",
+    ),
+  );
+  assert.ok(
+    manifest.capabilities.api_routes.some(
+      (route) =>
+        route.method === "POST" &&
+        route.path === "/_rtx/governed" &&
+        route.match === "prefix",
+    ),
+  );
 });
