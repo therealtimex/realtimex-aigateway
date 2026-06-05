@@ -1,3 +1,5 @@
+import { resolveGovernedNativeOrigin } from "../gateway/governedRouting.js";
+
 function stripHopByHopHeaders(headers = {}) {
   const nextHeaders = {};
 
@@ -18,7 +20,12 @@ function buildNativeTargetUrl(origin, requestUrl) {
   return `${normalizedOrigin}${pathWithQuery}`;
 }
 
-function resolveNativeProxyTarget(requestUrl, requestHeaders = {}, parsedBody = null) {
+function resolveNativeProxyTarget({
+  requestUrl,
+  requestHeaders = {},
+  parsedBody = null,
+  routing = null,
+}) {
   const pathname = requestUrl.pathname;
   const userAgent = String(requestHeaders["user-agent"] || "").trim().toLowerCase();
   const bodyUserAgent = String(parsedBody?.userAgent || "").trim().toLowerCase();
@@ -27,6 +34,39 @@ function resolveNativeProxyTarget(requestUrl, requestHeaders = {}, parsedBody = 
     userAgent.includes("antigravity") ||
     bodyUserAgent === "antigravity" ||
     requestType === "agent";
+  const governedOrigin = resolveGovernedNativeOrigin(routing);
+
+  if (governedOrigin) {
+    if (routing.canonicalAgent === "codex") {
+      if (pathname.startsWith("/backend-api/codex/") || pathname === "/v1/responses") {
+        return {
+          provider: "codex",
+          origin: governedOrigin,
+        };
+      }
+      return null;
+    }
+
+    if (routing.canonicalAgent === "claude") {
+      if (pathname === "/v1/messages") {
+        return {
+          provider: "claude",
+          origin: governedOrigin,
+        };
+      }
+      return null;
+    }
+
+    if (routing.canonicalAgent === "gemini" && pathname.startsWith("/v1internal:") && !isAntigravity) {
+      return {
+        provider: "gemini-cli",
+        origin: governedOrigin,
+      };
+    }
+    if (routing.canonicalAgent === "gemini") {
+      return null;
+    }
+  }
 
   if (pathname.startsWith("/backend-api/codex/") || pathname === "/v1/responses") {
     return {
@@ -61,8 +101,14 @@ export async function passThroughNativeRequest({
   requestId = null,
   fetchFn = fetch,
   adapter,
+  routing = null,
 }) {
-  const target = resolveNativeProxyTarget(requestUrl, requestHeaders, parsedBody);
+  const target = resolveNativeProxyTarget({
+    requestUrl,
+    requestHeaders,
+    parsedBody,
+    routing,
+  });
   if (!target) {
     return null;
   }

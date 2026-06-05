@@ -1,7 +1,54 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createRequire } from "node:module";
 
 import { createGatewayServer } from "../src/server/createServer.js";
+import { stagePluginRelease } from "../scripts/build-plugin-release.mjs";
+
+const require = createRequire(import.meta.url);
+
+function createPluginApi(overrides = {}) {
+  return {
+    getConfig() {
+      return {
+        AUTO_START_GATEWAY: true,
+        AIGATEWAY_HOST: "127.0.0.1",
+        AIGATEWAY_PORT: 4010,
+        AIGATEWAY_PROXY_ENABLED: true,
+        AIGATEWAY_PROXY_HOST: "127.0.0.1",
+        AIGATEWAY_PROXY_PORT: 20128,
+        AIGATEWAY_EXECUTION_PROVIDER: "gemini-cli",
+        AIGATEWAY_EXECUTION_BASE_URL:
+          "https://cloudcode-pa.googleapis.com/v1internal",
+        ...overrides,
+      };
+    },
+  };
+}
+
+async function getLaunchContextPayload(t, body, configOverrides = {}) {
+  const outDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "realtimex-aigateway-plugin-stage-"),
+  );
+  const build = stagePluginRelease({ outDir });
+  const { getLaunchContextPayload: getLaunchContextPayloadFromRuntime } = require(
+    path.join(build.stageDir, "runtime.js"),
+  );
+
+  t.after(() => {
+    fs.rmSync(outDir, { recursive: true, force: true });
+  });
+
+  return getLaunchContextPayloadFromRuntime({
+    api: createPluginApi(configOverrides),
+    request: {
+      body,
+    },
+  });
+}
 
 test("gateway server exposes /health and /dashboard", async (t) => {
   const gateway = createGatewayServer({
@@ -11,8 +58,8 @@ test("gateway server exposes /health and /dashboard", async (t) => {
       localProxy: {
         enabled: true,
         status: "configured",
-        baseUrl: "http://127.0.0.1:20128",
-        port: 20128,
+        baseUrl: "http://127.0.0.1:0",
+        port: 0,
         source: "plugin",
         notes: ["Configured in plugin state."],
       },
@@ -34,7 +81,7 @@ test("gateway server exposes /health and /dashboard", async (t) => {
   assert.equal(healthBody.service, "realtimex-aigateway");
   assert.equal(healthBody.plugin.runtimeStatus, "listening");
   assert.equal(healthBody.localProxy.enabled, true);
-  assert.equal(healthBody.localProxy.baseUrl, "http://127.0.0.1:20128");
+  assert.match(healthBody.localProxy.baseUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
 
   const dashboardResponse = await fetch(
     `http://${address.host}:${address.port}/dashboard`,
@@ -172,6 +219,168 @@ test("gateway server passes through native codex responses requests", async (t) 
   const dashboardBody = await dashboardResponse.json();
   assert.equal(dashboardBody.analytics.summary.trackedRequests, 1);
   assert.equal(dashboardBody.analytics.summary.upstreamDispatches, 1);
+});
+
+test("gateway server honors governed qwen launch-context routing for hosted chat without an injected adapter", async (t) => {
+  const payload = await getLaunchContextPayload(t, {
+    canonicalAgent: "qwen",
+    forwardedProvider: "openrouter",
+    modelId: "qwen3-coder-plus",
+  });
+  const governedBaseUrl = new URL(payload.launchEnv.OPENAI_BASE_URL);
+  let capturedRequest = null;
+
+  const gateway = createGatewayServer({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      execution: {
+        provider: "gemini-cli",
+        baseUrl: "https://cloudcode-pa.googleapis.com/v1internal",
+      },
+      localProxy: {
+        enabled: true,
+        status: "configured",
+        baseUrl: "http://127.0.0.1:0",
+        port: 0,
+        source: "plugin",
+        notes: [],
+      },
+    },
+    fetchFn: async (url, init) => {
+      capturedRequest = {
+        url,
+        headers: init.headers,
+        body: JSON.parse(init.body),
+      };
+
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            id: "chatcmpl-qwen-governed",
+            object: "chat.completion",
+            created: 1,
+            model: "qwen3-coder-plus",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Hi from governed Qwen",
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 6,
+              completion_tokens: 4,
+              total_tokens: 10,
+            },
+          };
+        },
+      };
+    },
+  });
+
+  const address = await gateway.start({ host: "127.0.0.1", port: 0 });
+
+  t.after(async () => {
+    await gateway.stop();
+  });
+
+  const response = await fetch(
+    `http://${address.host}:${address.port}${governedBaseUrl.pathname}/v1/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer qwen-token-123",
+      },
+      body: JSON.stringify({
+        model: "qwen3-coder-plus",
+        messages: [{ role: "user", content: "Hi from governed Qwen" }],
+      }),
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(capturedRequest.url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(capturedRequest.headers["X-Title"], "Endpoint Proxy");
+  assert.equal(capturedRequest.body.messages[0].role, "system");
+});
+
+test("gateway server honors governed codex launch-context routing for native passthrough", async (t) => {
+  const payload = await getLaunchContextPayload(t, {
+    canonicalAgent: "codex",
+    forwardedProvider: "openrouter",
+  });
+  const governedBaseUrl = new URL(payload.launchEnv.OPENAI_BASE_URL);
+  let capturedRequest = null;
+
+  const gateway = createGatewayServer({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      execution: {
+        provider: "gemini-cli",
+        baseUrl: "https://cloudcode-pa.googleapis.com/v1internal",
+      },
+      localProxy: {
+        enabled: true,
+        status: "configured",
+        baseUrl: "http://127.0.0.1:0",
+        port: 0,
+        source: "plugin",
+        notes: [],
+      },
+    },
+    fetchFn: async (url) => {
+      capturedRequest = { url };
+      return {
+        status: 200,
+        headers: new Headers({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        async text() {
+          return JSON.stringify({
+            id: "resp_811",
+            status: "completed",
+          });
+        },
+      };
+    },
+  });
+
+  const address = await gateway.start({ host: "127.0.0.1", port: 0 });
+
+  t.after(async () => {
+    await gateway.stop();
+  });
+
+  const response = await fetch(
+    `http://${address.host}:${address.port}${governedBaseUrl.pathname}/backend-api/codex/responses`,
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer codex-token",
+        "content-type": "application/json",
+        "user-agent": "codex-cli/1.0.18",
+      },
+      body: JSON.stringify({
+        model: "gpt-5-codex",
+        input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      }),
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(
+    capturedRequest.url,
+    "https://chatgpt.com/backend-api/codex/responses",
+  );
+  assert.equal(governedBaseUrl.pathname, "/_rtx/governed/codex");
 });
 
 test("gateway server executes hosted gemini chat via injected adapter and fetch", async (t) => {

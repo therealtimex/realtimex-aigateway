@@ -26,7 +26,7 @@ test("dashboard runtime returns a contract-backed payload with supported agents"
   assert.equal(payload.catalog.summary.installed, 0);
   assert.equal(payload.catalog.summary.uninstalled, 5);
   assert.equal(payload.catalog.summary.docsLinked, 5);
-  assert.equal(payload.catalog.summary.forwardable, 4);
+  assert.equal(payload.catalog.summary.forwardable, 1);
   assert.equal(payload.catalog.agents[0].canonical, "gemini");
   assert.equal(payload.catalog.agents[0].label, "Gemini");
   assert.equal(payload.catalog.agents[0].installed, false);

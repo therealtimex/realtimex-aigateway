@@ -108,6 +108,12 @@ First-class target providers:
 - Codex / OpenAI
 - Antigravity
 
+Current forwarding boundary:
+
+- governed sessions use launch-context-provided proxy base URLs under `/_rtx/governed/...`, and the gateway routes governed traffic from that prefix at request time
+- only Qwen currently advertises and honors forwarded-provider routing (`openrouter`)
+- Gemini, Claude, and Codex currently govern by canonical agent only and do not advertise forwarded-provider support
+
 ## Repository Layout
 
 - `docs/`

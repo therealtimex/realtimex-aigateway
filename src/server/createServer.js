@@ -2,11 +2,13 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 
 import { createHostAdapter } from "../adapters/createHostAdapter.js";
+import { createRequestScopedCredentialBridge } from "../adapters/requestScopedCredentials.js";
 import { handleHostedChatCore } from "../vendor/9router/open-sse/handlers/chatCore.js";
 import { createTerminalGovernancePluginRuntime } from "../plugin/runtime.js";
 import { resolveServerConfig } from "./config.js";
 import { handleAntigravityIngress } from "../gateway/handleAntigravityIngress.js";
 import { passThroughNativeRequest } from "./nativePassThrough.js";
+import { extractGovernedRouting } from "../gateway/governedRouting.js";
 
 function jsonResponse(response, status, payload) {
   response.writeHead(status, {
@@ -84,6 +86,25 @@ function createInstrumentedAdapter(baseAdapter, runtime) {
   });
 }
 
+function createRequestContextRegistry() {
+  const contexts = new Map();
+
+  return {
+    set(connectionId, context) {
+      if (!connectionId) return;
+      contexts.set(connectionId, context);
+    },
+    get(connectionId) {
+      if (!connectionId) return null;
+      return contexts.get(connectionId) ?? null;
+    },
+    delete(connectionId) {
+      if (!connectionId) return;
+      contexts.delete(connectionId);
+    },
+  };
+}
+
 function isAntigravityRequest({ headers = {}, body = null } = {}) {
   const userAgent = String(headers["user-agent"] || "")
     .trim()
@@ -107,117 +128,134 @@ export function createGatewayRequestListener({
   adapter = createHostAdapter(),
   fetchFn = fetch,
   config = resolveServerConfig(process.env),
+  requestContextRegistry = createRequestContextRegistry(),
 } = {}) {
   return async function gatewayRequestListener(request, response) {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    const governedRequest = extractGovernedRouting(url.pathname);
+    const normalizedUrl = new URL(url.toString());
+    normalizedUrl.pathname = governedRequest.normalizedPath;
     const requestId = randomUUID();
 
-    if (request.method === "GET" && url.pathname === "/health") {
-      const dashboard = runtime.getDashboard();
+    try {
+      if (request.method === "GET" && normalizedUrl.pathname === "/health") {
+        const dashboard = runtime.getDashboard();
 
-      return jsonResponse(response, 200, {
-        status: "ok",
-        service: "realtimex-aigateway",
-        plugin: dashboard.plugin,
-        localProxy: dashboard.localProxy,
-      });
-    }
+        return jsonResponse(response, 200, {
+          status: "ok",
+          service: "realtimex-aigateway",
+          plugin: dashboard.plugin,
+          localProxy: dashboard.localProxy,
+        });
+      }
 
-    if (request.method === "POST") {
-      runtime.recordIngress({
-        requestId,
-        method: request.method,
-        path: `${url.pathname}${url.search || ""}`,
-      });
-      const body = await readRequestBody(request);
-
-      const nativePassThroughResponse = await passThroughNativeRequest({
-        requestUrl: url,
-        requestHeaders: request.headers,
-        requestMethod: request.method,
-        rawBody: body.rawBody,
-        parsedBody: body.json,
-        requestId,
-        fetchFn,
-        adapter,
-      });
-
-      if (nativePassThroughResponse) {
-        const delivered = await sendFetchResponse(response, nativePassThroughResponse);
-        runtime.recordDelivery({
+      if (request.method === "POST") {
+        runtime.recordIngress({
           requestId,
           method: request.method,
           path: `${url.pathname}${url.search || ""}`,
-          status: delivered.status,
         });
-        return;
-      }
-
-      if (url.pathname === "/v1/chat/completions") {
-        const result = await handleHostedChatCore({
-          body: body.json || {},
-          adapter,
-          fetchFn,
-          execution: config.execution,
-          connectionId: requestId,
-          request: {
-            path: url.pathname,
-            headers: request.headers,
-          },
-        });
-        const delivered = await sendFetchResponse(response, result.response);
-        runtime.recordDelivery({
-          requestId,
-          method: request.method,
-          path: url.pathname,
-          status: delivered.status,
-        });
-        return;
-      }
-
-      if (
-        (url.pathname === "/v1internal:generateContent" ||
-          url.pathname === "/v1internal:streamGenerateContent") &&
-        isAntigravityRequest({
+        const body = await readRequestBody(request);
+        requestContextRegistry.set(requestId, {
           headers: request.headers,
-          body: body.json,
-        })
-      ) {
-        const result = await handleAntigravityIngress({
           body: body.json || {},
-          adapter,
-          fetchFn,
-          execution: config.execution,
-          connectionId: requestId,
-          request: {
-            path: url.pathname,
-            headers: request.headers,
-          },
-          stream: url.pathname === "/v1internal:streamGenerateContent",
+          path: normalizedUrl.pathname,
+          routing: governedRequest.routing,
         });
-        const delivered = await sendFetchResponse(response, result.response);
+
+        const nativePassThroughResponse = await passThroughNativeRequest({
+          requestUrl: normalizedUrl,
+          requestHeaders: request.headers,
+          requestMethod: request.method,
+          rawBody: body.rawBody,
+          parsedBody: body.json,
+          requestId,
+          fetchFn,
+          adapter,
+          routing: governedRequest.routing,
+        });
+
+        if (nativePassThroughResponse) {
+          const delivered = await sendFetchResponse(response, nativePassThroughResponse);
+          runtime.recordDelivery({
+            requestId,
+            method: request.method,
+            path: `${url.pathname}${url.search || ""}`,
+            status: delivered.status,
+          });
+          return;
+        }
+
+        if (normalizedUrl.pathname === "/v1/chat/completions") {
+          const result = await handleHostedChatCore({
+            body: body.json || {},
+            adapter,
+            fetchFn,
+            execution: config.execution,
+            connectionId: requestId,
+            routing: governedRequest.routing,
+            request: {
+              path: normalizedUrl.pathname,
+              headers: request.headers,
+            },
+          });
+          const delivered = await sendFetchResponse(response, result.response);
+          runtime.recordDelivery({
+            requestId,
+            method: request.method,
+            path: url.pathname,
+            status: delivered.status,
+          });
+          return;
+        }
+
+        if (
+          (normalizedUrl.pathname === "/v1internal:generateContent" ||
+            normalizedUrl.pathname === "/v1internal:streamGenerateContent") &&
+          isAntigravityRequest({
+            headers: request.headers,
+            body: body.json,
+          })
+        ) {
+          const result = await handleAntigravityIngress({
+            body: body.json || {},
+            adapter,
+            fetchFn,
+            execution: config.execution,
+            connectionId: requestId,
+            routing: governedRequest.routing,
+            request: {
+              path: normalizedUrl.pathname,
+              headers: request.headers,
+            },
+            stream: normalizedUrl.pathname === "/v1internal:streamGenerateContent",
+          });
+          const delivered = await sendFetchResponse(response, result.response);
+          runtime.recordDelivery({
+            requestId,
+            method: request.method,
+            path: `${url.pathname}${url.search || ""}`,
+            status: delivered.status,
+          });
+          return;
+        }
+      }
+
+      const pluginResponse = runtime.handleRequest({
+        method: request.method,
+        path: url.pathname,
+      });
+      const delivered = await sendPluginResponse(response, pluginResponse);
+      if (request.method === "POST") {
         runtime.recordDelivery({
           requestId,
           method: request.method,
           path: `${url.pathname}${url.search || ""}`,
           status: delivered.status,
         });
-        return;
       }
-    }
-
-    const pluginResponse = runtime.handleRequest({
-      method: request.method,
-      path: url.pathname,
-    });
-    const delivered = await sendPluginResponse(response, pluginResponse);
-    if (request.method === "POST") {
-      runtime.recordDelivery({
-        requestId,
-        method: request.method,
-        path: `${url.pathname}${url.search || ""}`,
-        status: delivered.status,
-      });
+    } finally {
+      requestContextRegistry.delete(requestId);
     }
   };
 }
@@ -229,12 +267,40 @@ export function createGatewayServer(options = {}) {
     createTerminalGovernancePluginRuntime({
       localProxy: config.localProxy,
     });
-  const adapter = createInstrumentedAdapter(options.adapter, runtime);
+  const requestContextRegistry = createRequestContextRegistry();
+  const requestScopedCredentialBridge = createRequestScopedCredentialBridge({
+    getRequestContext: (connectionId) => requestContextRegistry.get(connectionId),
+  });
+  const baseAdapter = createHostAdapter({
+    async getProviderCredentials(...args) {
+      return (
+        (await options.adapter?.getProviderCredentials?.(...args)) ??
+        (await requestScopedCredentialBridge.getProviderCredentials(...args))
+      );
+    },
+    async refreshProviderCredentials(...args) {
+      return (
+        (await options.adapter?.refreshProviderCredentials?.(...args)) ??
+        (await requestScopedCredentialBridge.refreshProviderCredentials(...args))
+      );
+    },
+    async emitTrace(event) {
+      await options.adapter?.emitTrace?.(event);
+    },
+    async emitUsage(event) {
+      await options.adapter?.emitUsage?.(event);
+    },
+    onLifecycleEvent(event) {
+      options.adapter?.onLifecycleEvent?.(event);
+    },
+  });
+  const adapter = createInstrumentedAdapter(baseAdapter, runtime);
   const requestListener = createGatewayRequestListener({
     runtime,
     adapter,
     fetchFn: options.fetchFn,
     config,
+    requestContextRegistry,
   });
   const server = http.createServer(requestListener);
   const proxyServer = config.localProxy?.enabled
