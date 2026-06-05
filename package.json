@@ -1,6 +1,6 @@
 {
   "name": "realtimex-aigateway",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "RealtimeX AI traffic governance gateway",
   "license": "MIT",
   "private": false,
