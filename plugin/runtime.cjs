@@ -10,6 +10,45 @@ const state = {
   runtimeStatus: "ready",
   lastError: null,
 };
+const GOVERNED_TERMINAL_AGENTS = new Set([
+  "antigravity",
+  "claude",
+  "codex",
+  "gemini",
+  "qwen",
+]);
+const QWEN_USER_AUTH_OVERLAY_KEYS = [
+  "security",
+  "modelProviders",
+  "env",
+  "model",
+  "providerMetadata",
+];
+const PROXY_BASE_URL_ENV_KEYS = [
+  "OPENAI_BASE_URL",
+  "ANTHROPIC_BASE_URL",
+  "GEMINI_BASE_URL",
+  "QWEN_BASE_URL",
+  "OPENROUTER_BASE_URL",
+  "DEEPSEEK_BASE_URL",
+  "GROQ_API_BASE_PATH",
+  "MISTRAL_BASE_URL",
+  "TOGETHER_AI_BASE_URL",
+  "FIREWORKS_AI_LLM_BASE_URL",
+  "PERPLEXITY_BASE_URL",
+  "NOVITA_LLM_BASE_URL",
+  "MOONSHOT_AI_BASE_URL",
+  "XAI_LLM_BASE_URL",
+  "PPIO_BASE_URL",
+  "APIPIE_LLM_BASE_URL",
+  "GENERIC_OPEN_AI_BASE_PATH",
+];
+const GEMINI_PROXY_ENV_KEYS = [
+  "GOOGLE_GEMINI_BASE_URL",
+  "GOOGLE_VERTEX_BASE_URL",
+  "CODE_ASSIST_ENDPOINT",
+];
+const CURSOR_PROXY_ENV_KEYS = ["CURSOR_API_ENDPOINT"];
 
 function readConfig(api) {
   const config = api.getConfig();
@@ -58,6 +97,204 @@ function buildGatewayEnv(config) {
     AIGATEWAY_PROXY_PORT: String(config.proxyPort),
     AIGATEWAY_EXECUTION_PROVIDER: config.executionProvider,
     AIGATEWAY_EXECUTION_BASE_URL: config.executionBaseUrl,
+  };
+}
+
+function normalizeIdentifier(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function buildProxyBaseUrl(config) {
+  return `http://${config.proxyHost}:${config.proxyPort}`;
+}
+
+function applyProviderBaseUrlOverrides(env = {}, baseUrl = "") {
+  const normalizedBaseUrl = String(baseUrl || "").trim();
+  if (!normalizedBaseUrl || !env || typeof env !== "object") {
+    return env;
+  }
+
+  for (const key of PROXY_BASE_URL_ENV_KEYS) {
+    env[key] = normalizedBaseUrl;
+  }
+  for (const key of GEMINI_PROXY_ENV_KEYS) {
+    env[key] = normalizedBaseUrl;
+  }
+  for (const key of CURSOR_PROXY_ENV_KEYS) {
+    env[key] = normalizedBaseUrl;
+  }
+  for (const key of Object.keys(env)) {
+    if (/_BASE_(URL|PATH)$/i.test(String(key || "").trim())) {
+      env[key] = normalizedBaseUrl;
+    }
+  }
+
+  return env;
+}
+
+function resolveQwenUserSettingsPath() {
+  const homeDir = String(process.env.HOME || process.env.USERPROFILE || "").trim();
+  if (!homeDir) return "";
+  return path.join(homeDir, ".qwen", "settings.json");
+}
+
+function safeReadJsonFile(filePath = "") {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    const raw = String(fs.readFileSync(filePath, "utf8") || "").trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildQwenSettingsOverlay({ baseUrl = "", modelId = "" } = {}) {
+  const source = safeReadJsonFile(resolveQwenUserSettingsPath());
+  const resolvedModelId = String(modelId || "qwen-max").trim() || "qwen-max";
+  const next = {};
+
+  for (const key of QWEN_USER_AUTH_OVERLAY_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(source || {}, key)) continue;
+    const value = source[key];
+    if (value && typeof value === "object") {
+      next[key] = JSON.parse(JSON.stringify(value));
+    }
+  }
+
+  if (next.env && typeof next.env === "object") {
+    applyProviderBaseUrlOverrides(next.env, baseUrl);
+  } else {
+    next.env = applyProviderBaseUrlOverrides({}, baseUrl);
+  }
+
+  const security = {
+    ...(next.security && typeof next.security === "object" ? next.security : {}),
+  };
+  const previousAuth =
+    security.auth && typeof security.auth === "object" ? security.auth : {};
+  security.auth = {
+    ...previousAuth,
+    selectedType:
+      String(previousAuth.selectedType || "").trim() === "qwen-oauth"
+        ? "openai"
+        : String(previousAuth.selectedType || "openai").trim() || "openai",
+    baseUrl,
+  };
+  next.security = security;
+
+  const modelProviders = {
+    ...(next.modelProviders && typeof next.modelProviders === "object"
+      ? next.modelProviders
+      : {}),
+  };
+  for (const [providerKey, models] of Object.entries(modelProviders)) {
+    if (!Array.isArray(models)) continue;
+    modelProviders[providerKey] = models.map((model) => ({
+      ...(model && typeof model === "object" ? model : {}),
+      baseUrl,
+    }));
+  }
+  if (!Array.isArray(modelProviders.openai) || modelProviders.openai.length === 0) {
+    modelProviders.openai = [
+      {
+        id: resolvedModelId,
+        name: resolvedModelId,
+        envKey: "OPENAI_API_KEY",
+        baseUrl,
+      },
+    ];
+  }
+  next.modelProviders = modelProviders;
+
+  if (!next.model || typeof next.model !== "object") {
+    next.model = { name: resolvedModelId };
+  } else if (!String(next.model.name || "").trim()) {
+    next.model.name = resolvedModelId;
+  }
+
+  return next;
+}
+
+function buildLaunchContextPayload({ config, body = {} }) {
+  const canonicalAgent = normalizeIdentifier(body.canonicalAgent);
+  if (!GOVERNED_TERMINAL_AGENTS.has(canonicalAgent)) {
+    return {
+      governed: false,
+      launchArgs: [],
+      launchEnv: {},
+      metadata: {
+        reason: "unsupported-agent",
+      },
+    };
+  }
+
+  if (!config.proxyEnabled) {
+    return {
+      governed: false,
+      launchArgs: [],
+      launchEnv: {},
+      metadata: {
+        reason: "proxy-disabled",
+      },
+    };
+  }
+
+  const baseUrl = buildProxyBaseUrl(config);
+  const launchEnv = applyProviderBaseUrlOverrides(
+    {
+      REALTIMEX_AIGATEWAY_ENABLED: "true",
+      REALTIMEX_AIGATEWAY_BASE_URL: baseUrl,
+      REALTIMEX_AIGATEWAY_CANONICAL_AGENT: canonicalAgent,
+      REALTIMEX_AIGATEWAY_FORWARDED_PROVIDER: String(
+        body.forwardedProvider || ""
+      ).trim(),
+    },
+    baseUrl
+  );
+
+  const overlays = {};
+  if (canonicalAgent === "qwen") {
+    overlays.qwen = {
+      settings: buildQwenSettingsOverlay({
+        baseUrl,
+        modelId: body.modelId,
+      }),
+    };
+  }
+
+  launchEnv.REALTIMEX_TERMINAL_GOVERNANCE_CONTEXT = JSON.stringify({
+    pluginId: metadata.plugin.manifestId,
+    routing: {
+      canonicalAgent,
+      forwardedProvider: String(body.forwardedProvider || "").trim() || null,
+    },
+    proxy: {
+      enabled: true,
+      baseUrl,
+    },
+    overlays,
+  });
+
+  const launchArgs =
+    canonicalAgent === "codex"
+      ? [
+          "--config",
+          `chatgpt_base_url=${JSON.stringify(baseUrl)}`,
+          "--config",
+          `openai_base_url=${JSON.stringify(baseUrl)}`,
+        ]
+      : [];
+
+  return {
+    governed: true,
+    launchArgs,
+    launchEnv,
+    metadata: {
+      plugin: metadata.plugin.displayName,
+      source: "plugin-launch-context",
+    },
   };
 }
 
@@ -279,9 +516,17 @@ async function getDashboardPayload({ api, pluginDir }) {
   return buildFallbackDashboard({ config });
 }
 
+async function getLaunchContextPayload({ api, request }) {
+  const config = readConfig(api);
+  return buildLaunchContextPayload({
+    config,
+    body: request?.body || {},
+  });
+}
+
 module.exports = {
   ensureGatewayProcess,
   stopGatewayProcess,
   getDashboardPayload,
+  getLaunchContextPayload,
 };
-

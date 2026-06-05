@@ -28,6 +28,12 @@ export function buildPluginManifest({ version }) {
           description:
             "Returns plugin-backed dashboard status for Terminal Agents settings.",
         },
+        {
+          method: "POST",
+          path: "/launch-context",
+          description:
+            "Builds generic launch context for governed terminal agent sessions.",
+        },
       ],
     },
     configSchema: [
@@ -107,4 +113,3 @@ export function buildPluginManifest({ version }) {
     permissions: [],
   };
 }
-

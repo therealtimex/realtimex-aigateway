@@ -33,5 +33,9 @@ test("stagePluginRelease writes an installable plugin layout", () => {
   assert.equal(manifest.id, "com.realtimex.aigateway");
   assert.equal(manifest.entrypoint, "index.js");
   assert.equal(manifest.capabilities.api_routes[0].path, "/dashboard");
+  assert.ok(
+    manifest.capabilities.api_routes.some(
+      (route) => route.method === "POST" && route.path === "/launch-context",
+    ),
+  );
 });
-
