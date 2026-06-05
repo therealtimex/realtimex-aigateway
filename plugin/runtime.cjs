@@ -51,6 +51,11 @@ const GEMINI_PROXY_ENV_KEYS = [
 const CURSOR_PROXY_ENV_KEYS = ["CURSOR_API_ENDPOINT"];
 const GOVERNED_ROUTE_PREFIX = "/_rtx/governed";
 const GOVERNED_ROUTE_METHODS = ["GET", "POST"];
+const RELAY_EXCLUDED_RESPONSE_HEADERS = new Set([
+  "content-encoding",
+  "content-length",
+  "transfer-encoding",
+]);
 const FORWARDED_PROVIDERS_BY_AGENT = {
   qwen: new Set(["openrouter"]),
 };
@@ -418,7 +423,9 @@ function buildGovernedProxyRequestInit(request = {}) {
 async function relayFetchResponse({ gatewayResponse, response }) {
   response.status(gatewayResponse.status);
   for (const [key, value] of gatewayResponse.headers.entries()) {
-    if (String(key || "").trim().toLowerCase() === "content-length") continue;
+    if (RELAY_EXCLUDED_RESPONSE_HEADERS.has(String(key || "").trim().toLowerCase())) {
+      continue;
+    }
     response.setHeader(key, value);
   }
 
@@ -714,4 +721,5 @@ module.exports = {
   GOVERNED_ROUTE_METHODS,
   buildGovernedProxyTargetUrl,
   buildGovernedProxyRequestInit,
+  relayFetchResponse,
 };
